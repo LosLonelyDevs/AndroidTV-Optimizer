@@ -14,6 +14,7 @@
 import demoApps from "./demo-apps.json";
 import pkg from "../../package.json";
 import type {
+  AudioReport, DisplayReport, StorageUsage, MediaApps,
   AppEntry,
   Device,
   HealthReport,
@@ -237,8 +238,128 @@ function demoDiagnostics(serial: string | null): string {
 }
 
 const apps = demoApps as AppEntry[];
+const storageUsage: StorageUsage = {
+  path: "/sdcard",
+  total_bytes: 2_105_368_576,
+  children: [
+    { path: "/sdcard/Wallpapers", bytes: 1_801_216_000, is_dir: true },
+    { path: "/sdcard/Download", bytes: 95_653_888, is_dir: true },
+    { path: "/sdcard/shield-optimizer-demo.apk", bytes: 115_949_568, is_dir: false },
+    { path: "/sdcard/Movies", bytes: 46_055_424, is_dir: true },
+    { path: "/sdcard/Android", bytes: 565_248, is_dir: true },
+    { path: "/sdcard/Documents", bytes: 126_976, is_dir: true },
+    { path: "/sdcard/Pictures", bytes: 12_288, is_dir: true },
+    { path: "/sdcard/Music", bytes: 12_288, is_dir: true },
+  ],
+  largest_files: [
+    { path: "/sdcard/Wallpapers/Lofi hip hop mix - Beats to Relax To.mp4", bytes: 593_428_480, is_dir: false },
+    { path: "/sdcard/Wallpapers/30 Minutes of Relaxing Visuals 1080p.mp4", bytes: 500_580_352, is_dir: false },
+    { path: "/sdcard/Wallpapers/CozyCyberpunkLoft_4K.mp4", bytes: 312_270_848, is_dir: false },
+    { path: "/sdcard/shield-optimizer-demo.apk", bytes: 115_949_568, is_dir: false },
+    { path: "/sdcard/Wallpapers/Desktop 2024.06.29.mp4", bytes: 113_582_080, is_dir: false },
+    { path: "/sdcard/Download/season-01-trailer.mkv", bytes: 72_327_168, is_dir: false },
+    { path: "/sdcard/Movies/home-video-2024.mp4", bytes: 46_055_424, is_dir: false },
+  ],
+};
+
+// A faithful subset of engine::safety for the packages that surface in the
+// demo memory table — so the risk badges + hovercards render truthfully
+// offline (SYSTEM for framework processes, CAUTION for the voice/Assistant
+// app the Health screen calls out). Everything else is implicitly Safe.
+
+const displayReport: DisplayReport = {
+  current: { resolution: "3840x2160", refresh_hz: 59.94, hdr_types: ["Dolby Vision", "HDR10", "HLG"] },
+  supported_modes: [
+    { resolution: "3840x2160", refresh_hz: 60, active: false },
+    { resolution: "3840x2160", refresh_hz: 59.94, active: true },
+    { resolution: "3840x2160", refresh_hz: 50, active: false },
+    { resolution: "3840x2160", refresh_hz: 30, active: false },
+    { resolution: "3840x2160", refresh_hz: 24, active: false },
+    { resolution: "1920x1080", refresh_hz: 60, active: false },
+  ],
+  match_content_frame_rate: "2",
+};
+
+
+const audioReport: AudioReport = {
+  mode: "manual",
+  mode_raw: "3",
+  formats: [
+    { id: 5, key: "ac3", label: "Dolby Digital (AC-3)", enabled: true },
+    { id: 6, key: "eac3", label: "Dolby Digital Plus (E-AC-3)", enabled: true },
+    { id: 18, key: "eac3_joc", label: "Dolby Atmos (E-AC-3 JOC)", enabled: true },
+    { id: 7, key: "dts", label: "DTS", enabled: true },
+    { id: 8, key: "dts_hd", label: "DTS-HD", enabled: false },
+    { id: 14, key: "truehd", label: "Dolby TrueHD", enabled: false },
+  ],
+  supported_encodings: ["Dolby Digital (AC-3)", "Dolby Digital Plus (E-AC-3)", "Dolby Atmos (E-AC-3 JOC)", "DTS"],
+  active_device: "HDMI",
+};
+
+
+const mediaApps: MediaApps = { kodi: true, plex: true, refresh_rate_app: "com.example.refreshrate" };
+
+
+const demoActivity = [
+  {
+    id: 1,
+    ts_ms: Date.parse("2026-06-02T14:40:12Z"),
+    source: "adb",
+    command: `adb -s ${SERIAL} shell "getprop ro.product.model"`,
+    output: "SHIELD Android TV",
+    ok: true,
+  },
+  {
+    id: 2,
+    ts_ms: Date.parse("2026-06-02T14:40:14Z"),
+    source: "adb",
+    command: `adb -s ${SERIAL} shell "dumpsys meminfo -s"`,
+    output: "Total RAM: 2,918,152K (status normal)\nUsed RAM: 1,764,208K\nFree RAM: 1,153,944K",
+    ok: true,
+  },
+  {
+    id: 3,
+    ts_ms: Date.parse("2026-06-02T14:40:31Z"),
+    source: "scrcpy",
+    command: `scrcpy --serial ${SERIAL} --audio-codec=aac`,
+    output: "(launched)",
+    ok: true,
+  },
+];
+
+// Map of command name → handler. Unlisted commands fall through to a benign
+// success so a stray click during capture never throws.
+
+const forkDisk = {
+    app_bytes: 4_294_967_296,
+    app_data_bytes: 2_899_102_720,
+    app_cache_bytes: 1_181_116_416,
+    photos_bytes: 11_210_752,
+    videos_bytes: 1_181_116_416,
+    audio_bytes: 0,
+    downloads_bytes: 268_435_456,
+    system_bytes: 2_147_483_648,
+    other_bytes: 42_949_632,
+    data_free_bytes: 5_582_983_680,
+    data_total_bytes: 15_461_882_368,
+    packages: [
+      { package: "com.netflix.ninja", app_bytes: 412_090_368, data_bytes: 96_468_992, cache_bytes: 188_743_680, total_bytes: 697_303_040 },
+      { package: "com.nvidia.tegrazone3", app_bytes: 388_071_424, data_bytes: 142_606_336, cache_bytes: 62_914_560, total_bytes: 593_592_320 },
+      { package: "com.plexapp.android", app_bytes: 214_958_080, data_bytes: 181_403_648, cache_bytes: 134_217_728, total_bytes: 530_579_456 },
+      { package: "com.amazon.amazonvideo.livingroom", app_bytes: 268_435_456, data_bytes: 88_080_384, cache_bytes: 109_051_904, total_bytes: 465_567_744 },
+      { package: "com.google.android.youtube.tv", app_bytes: 186_646_528, data_bytes: 71_303_168, cache_bytes: 142_606_336, total_bytes: 400_556_032 },
+      { package: "com.disney.disneyplus", app_bytes: 201_326_592, data_bytes: 62_914_560, cache_bytes: 83_886_080, total_bytes: 348_127_232 },
+      { package: "com.google.android.gms", app_bytes: 167_772_160, data_bytes: 104_857_600, cache_bytes: 41_943_040, total_bytes: 314_572_800 },
+      { package: "com.spotify.tv.android", app_bytes: 96_468_992, data_bytes: 52_428_800, cache_bytes: 117_440_512, total_bytes: 266_338_304 },
+      { package: "tv.twitch.android.app", app_bytes: 134_217_728, data_bytes: 33_554_432, cache_bytes: 62_914_560, total_bytes: 230_686_720 },
+      { package: "com.google.android.katniss", app_bytes: 88_080_384, data_bytes: 67_108_864, cache_bytes: 29_360_128, total_bytes: 184_549_376 },
+      { package: "com.google.android.tvlauncher", app_bytes: 71_303_168, data_bytes: 41_943_040, cache_bytes: 20_971_520, total_bytes: 134_217_728 },
+      { package: "com.android.vending", app_bytes: 62_914_560, data_bytes: 31_457_280, cache_bytes: 16_777_216, total_bytes: 111_149_056 },
+    ],
+  };
 
 const health: HealthReport = {
+  disk: forkDisk,
   display: {
     resolution: "3840x2160",
     refresh_hz: 60,
@@ -518,6 +639,8 @@ function demoShellOutput(command: string): string {
 // success so a stray click during capture never throws.
 function handle(cmd: string, args: Record<string, unknown>): unknown {
   switch (cmd) {
+    case "plugin:updater|check":
+      return null;
     case "adb_status":
       return { available: true, path: "/opt/homebrew/bin/adb", last_probe: "2026-06-02T14:40:00Z" };
     case "get_stop_adb_on_quit":
@@ -587,7 +710,26 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     // Deliberately omits the native processes in top_memory (surfaceflinger
     // and friends), because those genuinely are not packages.
     case "list_installed_packages":
-      return [
+      // Everything on the device — the curated catalog (bar what isn't
+      // installed) plus the long tail. `catalog` is what the App List's Kind
+      // filter splits on, so both halves have to be present here.
+      return [...new Map([
+        ...apps
+          .filter((a) => !MISSING.has(a.package))
+          .map((a) => ({
+            package: a.package,
+            system: true,
+            enabled: !DISABLED.has(a.package),
+            name: a.name,
+            catalog: true,
+          })),
+        { package: "com.teamsmart.videomanager.tv", system: false, enabled: true, name: "SmartTube", catalog: false },
+        { package: "ca.devmesh.overseerrtv", system: false, enabled: true, name: "Overseerr (TV)", catalog: false },
+        { package: "org.fdroid.fdroid", system: false, enabled: true, name: "F-Droid", catalog: false },
+        { package: "com.android.vending", system: true, enabled: true, name: null, catalog: false },
+        { package: "com.android.providers.media", system: true, enabled: true, name: null, catalog: false },
+        { package: "com.nvidia.ota", system: true, enabled: false, name: null, catalog: false },
+        ...([
         ...apps.map((a) => ({
           package: a.package,
           system: true,
@@ -612,7 +754,8 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
         { package: "com.android.vending", system: true, enabled: true, name: null },
         { package: "com.android.providers.media", system: true, enabled: true, name: null },
         { package: "com.nvidia.ota", system: true, enabled: false, name: null },
-      ];
+      ]),
+      ].filter((entry) => !MISSING.has(entry.package)).map((entry) => [entry.package, entry])).values()].map((entry) => ({ ...entry, catalog: apps.some((app) => app.package === entry.package) }));
     case "list_other_packages":
       return [
         { package: "com.teamsmart.videomanager.tv", system: false, enabled: true, name: "SmartTube", description: "An open-source YouTube client for Android TV." },
@@ -657,19 +800,15 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       return { app_bytes: 11_534_336, data_bytes: null, cache_bytes: null };
     case "app_usage_map":
       return {
-        "com.netflix.ninja": { last_used: "2026-06-05 20:10:00", launch_count: 412 },
-        "com.teamsmart.videomanager.tv": { last_used: "2026-06-04 21:30:00", launch_count: 88 },
-        "com.hulu.plus": { last_used: "2026-03-12 19:02:00", launch_count: 4 },
-        "com.showtime.standalone": { last_used: null, launch_count: 0 },
-        "com.google.android.feedback": { last_used: "2026-06-01 08:14:00", launch_count: 3 },
-        "com.android.printspooler": { last_used: null, launch_count: 0 },
-        "com.android.gallery3d": { last_used: null, launch_count: 0 },
-        "com.google.android.videos": { last_used: "2025-11-02 21:40:00", launch_count: 6 },
-        "com.google.android.music": { last_used: null, launch_count: 0 },
-        "com.Funimation.FunimationNow.androidtv": { last_used: null, launch_count: 0 },
+        // ~92 days of uptime, so "no record" is long enough to mean unused.
+        window_secs: 7_920_000,
+        entries: {
+          "com.netflix.ninja": { last_used: "2026-06-05 20:10:00", launch_count: 412 },
+          "com.teamsmart.videomanager.tv": { last_used: "2026-06-04 21:30:00", launch_count: 88 },
+          "com.hulu.plus": { last_used: "2026-03-12 19:02:00", launch_count: 4 },
+          "com.showtime.standalone": { last_used: null, launch_count: 0 },
+        },
       };
-    // Process names from a memory report never consult the catalog — an
-    // unverified string must not inherit a curated verdict.
     case "process_safety_info": {
       const proc = String(args.process ?? "");
       if (proc === "com.android.systemui" || proc === "com.google.android.gms") {
@@ -919,6 +1058,67 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       (w.__SAVED_APP_REPORTS__ ??= []).push({ path: args.path, contents: args.contents });
       return null;
     }
+    case "ping_device":
+      return true;
+    case "storage_usage":
+      return storageUsage;
+    case "installed_package_versions":
+      // Demo folder scan returns no APKs, so this is never really exercised;
+      // answer with an empty map so the Install-APK tab stays well-behaved.
+      return {};
+    case "list_safety_overrides":
+      return [];
+    case "set_safety_override":
+      // Echo back a one-item list so the UI reflects the toggle in demo mode.
+      return args.safe ? [args.package as string] : [];
+    case "list_boot_tweaks":
+      return [{ namespace: "global", key: "background_process_limit", value: "2" }];
+    case "set_boot_tweak":
+      return [{ namespace: "global", key: "background_process_limit", value: "2" }];
+    case "reapply_boot_tweaks":
+      return { reapplied: [], ok: true, message: "" };
+    case "system_info":
+      return {
+        battery_percent: null,
+        input_method: "com.google.android.leanbackkeyboard/.LeanbackImeService",
+        play_protect_enabled: true,
+        user_rotation: "0",
+        screen_off_timeout: "1800000",
+        location_mode: "0",
+        developer_options: "1",
+        doze_enabled: "1",
+      };
+    case "list_quick_apps":
+      return [
+        { name: "TizenTube Cobalt", package: "io.gh.reisxd.tizentube.cobalt", description: "Ad-free YouTube with SponsorBlock and DeArrow — the Cobalt build runs on Android TV.", source: "github", repo: "reisxd/TizenTubeCobalt", asset_match: null, tag: null, fallback_url: null, installed: true },
+        { name: "Flicky", package: "app.flicky", description: "F-Droid client built for wide screens and TVs — browse and install open-source apps from the couch.", source: "github", repo: "mlm-games/flicky", asset_match: null, tag: null, fallback_url: null, installed: false },
+        { name: "MATVT", package: "io.github.virresh.matvt", description: "Virtual mouse for Android TV, driven by the remote's d-pad — for apps that were never built for TV.", source: "github", repo: "virresh/matvt", asset_match: "pre2", tag: "v1.0.7-pre", fallback_url: null, installed: false },
+        { name: "ObtainX", package: "dev.bikram.obtainx", description: "Get app updates straight from their GitHub releases — Obtainium reimagined with a TV-friendly UI.", source: "github", repo: "bikram-agarwal/ObtainX", asset_match: null, tag: null, fallback_url: null, installed: false },
+        { name: "Aurora Store", package: "com.aurora.store", description: "Open-source Play Store client — install/update apps without a Google account.", source: "gitlab", repo: "AuroraOSS/AuroraStore", asset_match: null, tag: null, fallback_url: null, installed: false },
+        { name: "LocalSend", package: "org.localsend.localsend_app", description: "AirDrop-style local file sharing between your PC, phone, and TV.", source: "github", repo: "localsend/localsend", asset_match: null, tag: null, fallback_url: null, installed: false },
+      ];
+    case "shizuku_status":
+      return { installed: true, running: true };
+    case "display_report":
+      return displayReport;
+    case "audio_report":
+      return audioReport;
+    case "detect_media_apps":
+      return mediaApps;
+    case "set_surround_output":
+      return { ok: true, message: "Surround output mode set (demo)." };
+    case "set_surround_formats":
+      return { ok: true, message: "Enabled formats updated (demo)." };
+    case "stage_kodi_config":
+      return { ok: true, message: "Wrote advancedsettings.xml.", device_path: "/sdcard/advancedsettings.xml" };
+    case "grant_write_secure_settings":
+      return { ok: true, message: "Granted WRITE_SECURE_SETTINGS (demo)." };
+    case "activity_tail":
+      // First poll returns the fixture; later polls (afterId advanced) return
+      // nothing so the demo log doesn't duplicate itself.
+      return ((args.afterId as number) ?? 0) > 0 ? [] : demoActivity;
+    case "run_console_shell":
+      return { ok: true, output: demoShellOutput(String(args.command ?? "")) };
     default:
       // Mutating commands (disable_package, set_default_launcher, …) aren't
       // exercised during capture; answer benignly just in case.

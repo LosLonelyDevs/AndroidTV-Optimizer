@@ -1,6 +1,14 @@
 # v2 — current state
 
-v2 is a shipping desktop app. Last **published** version: **2.3.0** (2026-09-30).
+v2 is a shipping desktop app. Last **published upstream** version: **2.3.0** (2026-09-30). This fork's desktop version is **2.3.1**.
+
+The desktop fork layers its settings groups, unified app table, quick installer,
+recording, storage tools, and per-device risk overrides over the shared Rust core.
+Desktop additions live in `src-tauri/src/commands/`; shared detection, safety,
+launcher recovery, and ADB lifetime tracking remain in `crates/core/`.
+The installer keeps the original Shield Optimizer product identity and pinned
+WiX UpgradeCode. The updater points to this fork's channel. The E2E server is a
+Cargo example (`--features e2e --example e2e_server`) so it cannot enter installers.
 
 Full release pipeline live: installers built for macOS/Linux/Windows on every `v2-*` tag push via `.github/workflows/v2-release.yml`; macOS also distributed via Homebrew tap (`bryanroscoe/homebrew-shield-optimizer`).
 
@@ -76,7 +84,7 @@ Feature parity gaps against aTV Tools — see **[`v2/ATVTOOLS-PARITY.md`](ATVTOO
 
 - **Mobile Android scaffold** — initial ATV Optimizer mobile app lives in [`mobile/`](mobile/). It builds an unsigned aarch64 APK and still needs real phone/TV validation for mDNS, pairing, reconnect, shell, and screencap.
 - **Memory-usage spike (user report)** — likely root-caused to a tab lazy-load re-fetch loop (fixed in PR #62); confirm it's gone on the next release build. Unrelated to the Health-tab verdict stall fixed in `73d481d`.
-- **Screen recording** — the one aTV Tools capability still absent; see [`ATVTOOLS-PARITY.md`](ATVTOOLS-PARITY.md).
+- **Screen recording** — available in this desktop fork; physical-device validation remains pending.
 - **Code signing** — builds are unsigned on macOS and Windows. Setup notes are at the top of `.github/workflows/v2-release.yml`.
 
 Done since this list was last written, kept here only because other docs still point at them as pending: remote-control latency (the scrcpy control channel shipped — `crates/core/src/adb/remote_input.rs`, server jar bundled at `v2/src-tauri/resources/scrcpy-server-v3.1`) and Remote clipboard paste (#91, shipped in `2d571fd` with the `test:remote-paste` harness).

@@ -31,7 +31,13 @@ this file and shows the newest few sections, dated, from its version button.
 
 - Launcher source pages remain available for installed and current-default launchers. Projectivy links to its official GitHub releases; opening the page never uninstalls or changes the current launcher (#161).
 
-## v2-2.3.1 — 2026-10-04
+## v2-2.3.1 — 2026-10-18
+
+### Fork integration
+
+- Port the desktop tools, unified app list, settings groups, storage breakdown, quick installer, recording, and per-device risk overrides onto upstream's shared Rust core.
+- Preserve upstream's protected-package checks, bounded shell execution, launcher recovery, and ADB shutdown tracking.
+- Keep the fork's updater endpoint and Windows upgrade identity; bump the desktop app to 2.3.1.
 
 Fixes for Google TV launcher switching (#122, #157, #158): Setup Wraith, Google TV's setup
 helper, no longer takes the Home button back after you change launchers, and every way of
@@ -537,6 +543,7 @@ whether this build works for you.
   rather than as offline.
 
 ## v2-2.1.0 — 2026-06-21
+
 
 Launcher switching is now fast and reliable, with much clearer feedback across
 the app.
@@ -1101,3 +1108,189 @@ beside it. If you'd rather stay on the TUI, nothing changes for you.
 ---
 
 <!-- Add new sections above this line. Older releases go below. -->
+
+## Fork release history
+
+### Fork v2-2.3.0
+
+- **The Health report now answers "what's using my storage?"** Three new
+  sections below Top Memory Users: a **Storage by category** bar (apps, app
+  data, caches, videos, photos, downloads, other, free), a **Storage by app**
+  table breaking each package into APK / data / cache with the total it would
+  free, and **Files on /sdcard** — a `du`-backed folder walk with breadcrumbs,
+  per-folder shares, and the largest individual files below whatever folder
+  you're in. Everything reads `dumpsys diskstats`, so no root is needed.
+- **Storage rows act on what they show.** Clear cache, Clear data and Uninstall
+  sit directly on each app row, and files and folders have a Delete button. The
+  do-not-disable list still gates uninstall, so protected packages show
+  *Protected* instead of a button.
+- **Uninstall is findable again.** The App List's per-row menu was labelled
+  "Actions" under a "Tools" column, which named the control instead of what it
+  does — people looking for uninstall never opened it. The column is now
+  **Manage**, the button says **Manage ▾**, and its tooltip lists what's inside
+  (uninstall, disable, clear data, back up).
+- The system-image figure from `dumpsys diskstats` is deliberately left out of
+  the category bar: several builds report it as a hardcoded round number (a
+  Shield claims 16 GB against a 12 GB `/data`), and it can't be freed anyway.
+
+---
+
+### Fork v2-2.2.10
+
+- **Downgrades actually install now.** The Install APK list has always been able
+  to *tell* you an APK was older than what's on the device — it labelled the row
+  DOWNGRADE — but the install itself ran plain `adb install -r`, which Android
+  rejects with `INSTALL_FAILED_VERSION_DOWNGRADE`. Installs now add `-d` when
+  the APK is the older one, and any install that trips the downgrade guard gets
+  one automatic retry with the flag set, so a file picked outside the scanned
+  folder (where there's no version to compare) works the same way. Downgrade
+  rows say "Downgrade" on the button and "Downgraded." on success.
+- **A way through when Android still says no.** `-d` only works for debuggable
+  apps, so on a retail device most downgrades fail even with it. That result now
+  offers an **Uninstall & install** button — it removes the installed copy and
+  installs the older APK, after warning that the app's data and sign-in go with
+  it.
+
+---
+
+### Fork v2-2.2.9
+
+- **Fixed "Last used" reporting almost every app as unused.** `dumpsys
+  usagestats` only exposes Android's in-memory buckets, and Android rebuilds
+  them at boot — every bucket, the one labelled "yearly" included, starts at the
+  last reboot. On a Shield up for 18 hours, 480 packages reported the epoch
+  timestamp and only 6 had real data. The column was reading the right field;
+  the problem was that "no record" was then treated as *stale = remove this*, so
+  a reboot turned every weekly-used app into a recommended removal. The backend
+  now reports device uptime alongside the usage map, "no record" only counts as
+  unused once the window is at least 30 days, and below that the label is
+  "not since reboot" (muted) instead of "no recent use" (warning). Tooltips say
+  how much history actually exists.
+- **Settings reorganized; Tweaks is gone.** It was a junk drawer — input,
+  network, TV-control, memory and display settings unified only by not fitting
+  anywhere else. Sub-tabs are now **Display · Audio · Input · Device**, with
+  HDMI-CEC and Display Scaling filed under Display alongside Screen Rotation and
+  Screen Timeout (moved off Device), remote/controller behaviour under Input,
+  and Private DNS / Background Process Limit / UI Animations under Device.
+- **Fixed a second duplicated control.** The Optimize wizard's "Apply 0.5×
+  animations" wrote the same three animation scales as Settings › Device › UI
+  Animations, so the two disagreed until you reloaded. The wizard now links to
+  that control instead of writing the setting itself.
+
+### Fork v2-2.2.8
+
+- **One App List.** The tab used to be two tables split by an implementation
+  detail — "curated" (in our JSON catalog) above, "Everything else" below — each
+  with its own columns, its own filter, and a different set of row actions. It's
+  now a single table with **Curated / User / System** filter chips (Curated +
+  User on by default, matching what the two tables used to show), a *Needs
+  action* filter, and one action menu for every row. Search, Hide-not-installed
+  and the counts now apply to the whole list instead of half of it each.
+- **Same tools whatever the app.** Uninstall, Clear cache and Clear data used to
+  be reachable only for non-catalog packages; Play Store only for catalog ones.
+  What's offered now follows the package's actual state, not which list it came
+  from. Protected packages are still refused by the engine's safety gate.
+- `list_other_packages` became `list_installed_packages` — it returns every
+  installed package with `system` and `catalog` flags, instead of silently
+  dropping the catalog half.
+- **Last used is its own column** in the App List, instead of a badge stacked
+  under the state pill, and Recommended is centered. The "remove if unused"
+  review action is now an icon button (🗑 to remove, ⊘ to disable — the glyph
+  tracks the action, since a trash can on a reversible disable would overstate
+  it) with the full wording on hover.
+- **Optimize hides no-ops.** The plan always contained every catalog app, and
+  the old filter only hid the not-installed ones — so a second run was a page of
+  "Already disabled" rows with nothing to decide. All three no-op kinds now
+  collapse behind one "Hide N with nothing to do" (default on), and when
+  *nothing* is actionable the table is replaced by a "Nothing to optimize"
+  panel. The summary counts against what's in play ("8 of 14 apps") rather than
+  the whole catalog ("8 of 62 items").
+- **Settings groups Display / Audio / Device / Tweaks** under one top-level tab
+  with sub-tabs, taking the device page from 12 tabs to 9. Opening Settings
+  still only queries the device for the sub-tab you're on.
+- **Install all.** When a folder holds more than one APK, Install APK now has an
+  "Install all (N)" button that installs them one at a time, with live progress
+  and a Stop button that takes effect after the current file. Every row keeps its
+  own result line, and the run ends with a tally.
+- **Fixed a duplicated control.** Match Content Frame Rate existed on both
+  Tweaks and Display, each caching its own read of
+  `secure.match_content_frame_rate`, so the two could disagree. It now lives
+  only on Display, next to the per-app refresh-rate tool it references.
+
+### Fork v2-2.2.3
+
+- **Risk badges explain themselves.** Every Risk pill in the Health Report and
+  App List — including UNKNOWN, and the "Everything else" table, which now has
+  a Risk column of its own — shows a hovercard on hover: what the rating means
+  and how it was decided (curated catalog tier, caution list, protected system
+  list, or none of the above → UNKNOWN).
+- **Mark as safe, per device.** The hovercard has a button to mark any
+  non-protected app safe, softening its badge and disable confirms. Marks are
+  stored against the device's stable identity (Android ID), not its adb
+  serial, so the same device keeps its marks across reconnects and DHCP
+  address changes. Protected (never-disable) system packages still refuse the
+  override. Marks saved by the old global format are migrated.
+- **Cleaner tables.** State and Risk render as consistent pills, numeric
+  columns right-align under right-aligned headers, and each row's actions sit
+  in a tidy cluster instead of wrapping raggedly.
+- **Install APK, reorganized.** Shizuku now has its own card above a single
+  Quick install section, and the "Popular sideloads" link list is gone.
+  Catalog: removed SmartTube, Obtainium, and AdGuard for Android TV; added
+  TizenTube Cobalt, Flicky, MATVT, and ObtainX. Quick-install entries can now
+  pin a GitHub release tag — needed for MATVT's v1.0.7-pre, since
+  `releases/latest` never returns prereleases.
+- **Background activity log.** The Console tab tails every adb / scrcpy
+  subprocess the app runs behind the scenes, with output — see why a mirror
+  window died without attaching a debugger. Also fixes the Shizuku installer.
+
+### Fork v2-2.2.2
+
+- **Keep after reboot.** Android resets `background_process_limit` to Standard
+  on every restart, and the device genuinely can't fix that itself: there's no
+  cron on Android, the ADB user isn't root so it can't install a boot script,
+  and the one loophole that would let an on-device app do it — Shizuku
+  self-starting via wireless debugging — doesn't exist on Shield, where NVIDIA
+  ships no wireless-debugging UI at all. So the app does it. Tick **Keep after
+  reboot** under Background Process Limit and your choice is re-applied the next
+  time the app connects to that device, with a banner saying what it restored.
+  Pins are stored per device and re-applied by comparing the device's current
+  value against the one you picked, so anything that resets the setting is
+  caught, not just a reboot.
+
+### Fork v2-2.2.1
+
+- **Shizuku: fixed "Set up Shizuku", now "Install / Start".** The old flow ran
+  `start.sh` from external storage — a script current Shizuku no longer ships,
+  so setup silently failed on an up-to-date install. It now execs the native
+  starter (`libshizuku.so`) bundled in the APK, resolving the APK path at run
+  time because Android regenerates its directory hash on every app update. The
+  button is safe to press repeatedly: it skips the install when Shizuku is
+  already there and just (re)starts the service, which is what you need after a
+  reboot. No wireless-debugging pairing code required — Android TV never shows
+  one, and it isn't needed when the service is started over ADB. Success is now
+  confirmed against the device's process table instead of the starter's output.
+
+### Fork unreleased
+
+Merged the Android TV Desktop Toolkit's feature set in and broadened the app
+from Shield-specific to a general **Android TV Optimizer**.
+
+- **Per-app maintenance**: Clear cache / Clear data (data-wipe gated by the
+  do-not-disable list + confirm) and a device-wide Kill background.
+- **Performance**: the Optimize/Restore pass now also flips the app freezer and
+  touch-response tuning; new Compile speed-profile action.
+- **New System tab**: rotation, screen timeout, GPS, developer options, ambient
+  display, NTP repair, wake/sleep, settings shortcuts, launch-by-package, and a
+  battery/IME/Play-Protect readout — each tunable shows a ★ recommended value.
+- **Recommendations** added across the Tweaks / Display / Audio settings.
+- **ADB Console**: a power-user `adb shell` runner with bookmarks.
+- **Screen recording** (screenrecord → pull) alongside Screenshot.
+- **Quick install**: auto-download the ABI-matched build of popular apps
+  (SmartTube, Aurora, Obtainium, LocalSend, AdGuard) and sideload with Play
+  Protect handled; standalone Play Protect toggle.
+- **Shizuku** one-click setup, **scrcpy mirror** window, and **mDNS** discovery
+  folded into Scan Network.
+- **Display name** is now "Android TV Optimizer". The package identifier, data
+  directory, updater endpoint, and installer UpgradeCode are intentionally
+  unchanged so existing installs upgrade in place; a full product/identifier
+  rename (and Homebrew cask) remains a deliberate future step.

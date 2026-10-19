@@ -295,7 +295,7 @@ jobs:
           set -euo pipefail
           # Tag is v2-X.Y.Z[-pre]; cask version is the part after v2-.
           version="${TAG#v2-}"
-          dmg_url="https://github.com/${{ github.repository }}/releases/download/${TAG}/ATV.Optimizer_${version}_universal.dmg"
+          dmg_url="https://github.com/${{ github.repository }}/releases/download/${TAG}/Shield.Optimizer_${version}_universal.dmg"
 
           echo "Fetching $dmg_url to compute SHA256…"
           # The release upload may take a beat to surface; retry briefly.
@@ -380,24 +380,27 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add v2/updater/latest.json
-          if git diff --cached --quiet; then
-            echo "Updater manifest unchanged; nothing to commit."
-          else
+
+          for attempt in 1 2 3 4 5; do
+            mkdir -p v2/updater
+            cp /tmp/latest.json v2/updater/latest.json
+            git add v2/updater/latest.json
+            if git diff --cached --quiet; then
+              echo "Updater manifest unchanged; nothing to commit."
+              exit 0
+            fi
             git commit -m "Update updater manifest for ${TAG}"
-            # `merge-updater` and `refresh-screenshots` both commit to the
-            # default branch and can finish at the same time, so the loser of
-            # the race gets a non-fast-forward rejection. That is what failed
-            # the v2-2.1.0 gallery job. Rebase and retry instead.
-            branch="${{ github.event.repository.default_branch }}"
-            for attempt in 1 2 3 4 5; do
-              if git push origin "HEAD:$branch"; then break; fi
-              echo "  push attempt $attempt rejected; rebasing on origin/$branch…"
-              git pull --rebase origin "$branch"
-              [[ $attempt -eq 5 ]] && { echo "push still failing after rebase"; exit 1; }
-            done
-            echo "Updater manifest published for ${TAG}."
-          fi
+            if git push origin HEAD:main; then
+              echo "Updater manifest published for ${TAG}."
+              exit 0
+            fi
+            echo "  attempt $attempt: main moved ahead, re-seating onto latest main…"
+            git fetch origin main
+            git reset --hard origin/main
+          done
+
+          echo "Could not push the updater manifest after 5 attempts." >&2
+          exit 1
 
   # Regenerate the README gallery GIF from the released UI and commit it back
   # to the default branch, so the screenshots never drift from what shipped.
@@ -409,10 +412,13 @@ jobs:
   # slightly different from one regenerated locally on a Mac; that's expected
   # and accepted as the price of hands-off release-time refresh.
   refresh-screenshots:
-    needs: [notes, build]
+    needs: [notes, build, merge-updater]
     name: Regenerate gallery GIF
     runs-on: ubuntu-latest
-    if: success()
+    if: >-
+      !cancelled()
+      && needs.notes.result == 'success'
+      && needs.build.result == 'success'
     steps:
       - name: Checkout default branch
         uses: actions/checkout@v5
@@ -456,17 +462,26 @@ jobs:
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add screenshots/gallery.gif screenshots/gallery-light.gif
-          git commit -m "Regenerate gallery GIFs for ${TAG}"
-          # `merge-updater` and `refresh-screenshots` both commit to the
-          # default branch and can finish at the same time, so the loser of
-          # the race gets a non-fast-forward rejection. That is what failed
-          # the v2-2.1.0 gallery job. Rebase and retry instead.
-          branch="${{ github.event.repository.default_branch }}"
+
+          stash="$(mktemp -d)"
+          cp screenshots/gallery.gif screenshots/gallery-light.gif "$stash/"
+
           for attempt in 1 2 3 4 5; do
-            if git push origin "HEAD:$branch"; then break; fi
-            echo "  push attempt $attempt rejected; rebasing on origin/$branch…"
-            git pull --rebase origin "$branch"
-            [[ $attempt -eq 5 ]] && { echo "push still failing after rebase"; exit 1; }
+            cp "$stash/gallery.gif" "$stash/gallery-light.gif" screenshots/
+            git add screenshots/gallery.gif screenshots/gallery-light.gif
+            if git diff --cached --quiet; then
+              echo "Galleries already match main; nothing to commit."
+              exit 0
+            fi
+            git commit -m "Regenerate gallery GIFs for ${TAG}"
+            if git push origin HEAD:main; then
+              echo "Galleries refreshed for ${TAG}."
+              exit 0
+            fi
+            echo "  attempt $attempt: main moved ahead, re-seating onto latest main…"
+            git fetch origin main
+            git reset --hard origin/main
           done
-          echo "Galleries refreshed for ${TAG}."
+
+          echo "Could not push the regenerated galleries after 5 attempts." >&2
+          exit 1

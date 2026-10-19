@@ -20,6 +20,13 @@ const PORT = 1421;
 const BASE = `http://localhost:${PORT}`;
 const SERIAL = "192.168.1.42:5555";
 const DEVICE_URL = `${BASE}/devices/${encodeURIComponent(SERIAL)}`;
+const RECENT_DEVICE = {
+  address: "192.168.1.87:5555",
+  name: "Living Room TV",
+  model: "Chromecast with Google TV",
+  device_type: "google_tv",
+  last_seen_at: Date.UTC(2026, 5, 1, 18, 30),
+};
 
 // One output dir per theme. colorScheme drives prefers-color-scheme, which the
 // app's "Auto" theme follows.
@@ -52,107 +59,101 @@ async function captureScreens(page, shot) {
     await page.getByText("NVIDIA SHIELD", { exact: false }).first().waitFor();
     await shot("devices");
 
-    // 2. Pairing, caught while it waits for the device to advertise its
-    // connect port (the demo never advertises one, so the frame is stable).
-    await page.locator(".connect-form").getByRole("button", { name: "Pair PIN" }).click();
-    await page.getByText("the app connects automatically", { exact: false }).waitFor();
-    await page.getByText("Do not reuse the pairing port.", { exact: false }).waitFor();
-    const pairAddress = page.getByPlaceholder("IP:pair_port — e.g. 192.168.42.71:43219");
-    const pairPin = page.getByPlaceholder("6-digit PIN");
-    const connectAddress = page.getByPlaceholder("IP[:port] — e.g. 192.168.42.71");
-    await pairAddress.fill("192.168.1.42:43219");
-    await pairPin.fill("123456");
-    await page.getByRole("button", { name: "Pair", exact: true }).click();
-    await page.getByText("Close the pairing dialog on your phone/TV.", { exact: false }).waitFor();
-    await page.getByText("Waiting for the device to advertise its connect port…", { exact: false }).waitFor();
-    if (await pairPin.inputValue()) throw new Error("pairing PIN was not cleared after submission");
-    if (await pairAddress.inputValue()) throw new Error("pairing address was not cleared after success");
-    // The paired host carries over with a bare trailing colon (#88); the
-    // connect port is different from the pairing port, so it is never guessed.
-    const carried = await connectAddress.inputValue();
-    if (carried !== "192.168.1.42:") {
-      throw new Error(`pairing should carry only the host into connect, got ${JSON.stringify(carried)}`);
-    }
-    await shot("pair-device");
-
-    // 3. Device → Overview (default tab).
+    // 2. Device → Overview (default tab; includes the Snapshots section).
     await page.goto(DEVICE_URL, { waitUntil: "networkidle" });
     await page.locator("#tab-overview").waitFor();
     await page.getByRole("heading", { name: "Profile" }).waitFor();
+    await page.getByRole("heading", { name: "Snapshots" }).waitFor();
     await shot("overview");
 
-    // 4. Health report.
+    // 3. Health report. The storage panel below the fold is on-demand, so
+    //    press Scan before capturing or the bottom half renders empty.
     await page.locator("#tab-health").click();
     await page.getByText("3840x2160", { exact: false }).first().waitFor();
+    await page.getByRole("button", { name: "Scan", exact: true }).click().catch(() => {});
+    await page.getByText("Largest files below", { exact: false }).first().waitFor().catch(() => {});
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(400);
     await shot("health");
-
-    // 5. Playback capabilities.
     await page.locator("#tab-media").click();
-    await page.getByText("Video codecs", { exact: true }).waitFor();
-    await shot("playback");
+    await page.getByRole("heading", { name: "Playback", exact: true }).waitFor();
+    await shot("media");
+    await page.locator("#tab-logs").click();
+    await page.getByRole("button", { name: "Read logs", exact: true }).click();
+    await page.getByText("Synthetic demo log entry", { exact: false }).waitFor();
+    await shot("logs");
 
-    // 6. Launcher.
-    await page.locator("#tab-launcher").click();
-    await page.getByText("Projectivy Launcher", { exact: false }).first().waitFor();
-    await shot("launcher");
-
-    // 7. App list.
+    // 5. App list.
     await page.locator("#tab-apps").click();
     await page.getByText("App List", { exact: false }).first().waitFor();
     await page.waitForTimeout(400);
-    // Open the first row's detail panel so the gallery shows the measurements
-    // with their source and read time, not just the collapsed table.
-    await page.locator(".app-table .row-caret").first().click();
-    await page.locator(".measures [data-measure='storage']").first().waitFor();
-    await page.mouse.move(0, 0);
     await shot("app-list");
 
-    // 8. Optimize wizard — needs a click to load the plan.
+    // 6. Optimize wizard — needs a click to load the plan.
     await page.locator("#tab-optimize").click();
     await page.getByRole("button", { name: "Optimize", exact: true }).click();
     await page.getByText("Run", { exact: false }).first().waitFor().catch(() => {});
     await page.waitForTimeout(600);
     await shot("optimize");
 
-    // 9. Tweaks.
-    await page.locator("#tab-tweaks").click();
-    await page.getByText("HDMI", { exact: false }).first().waitFor();
-    await shot("tweaks");
+    // 7. Settings — one tab with Display / Audio / Device / Tweaks sub-tabs.
+    await page.locator("#tab-settings").click();
 
-    // 10. Remote.
+    // 7a. Display (includes the Launchers section). Opens by default.
+    await page.locator("#subtab-display").click();
+    await page.getByText("Supported Modes", { exact: false }).first().waitFor();
+    await page.getByText("Projectivy Launcher", { exact: false }).first().waitFor();
+    await page.getByText("HDMI-CEC", { exact: false }).first().waitFor();
+    await page.waitForTimeout(300);
+    await shot("display");
+
+    // 7b. Audio.
+    await page.locator("#subtab-audio").click();
+    await page.getByText("Surround Output Mode", { exact: false }).first().waitFor();
+    await page.waitForTimeout(300);
+    await shot("audio");
+
+    // 7c. Input — remote/controller behaviour.
+    await page.locator("#subtab-input").click();
+    await page.getByText("Long Press Timeout", { exact: false }).first().waitFor();
+    await page.waitForTimeout(300);
+    await shot("input");
+
+    // 7d. Device.
+    await page.locator("#subtab-system").click();
+    await page.getByText("Device Info", { exact: false }).first().waitFor();
+    await page.waitForTimeout(300);
+    await shot("system");
+
+    // 8. Remote.
     await page.locator("#tab-remote").click();
     await page.getByText("Live typing", { exact: false }).first().waitFor();
     await shot("remote");
 
-    // 11. Files.
+    // 9. Files.
     await page.locator("#tab-files").click();
-    // The row tools are icons now, and the legend's text node sits beside an
-    // icon ligature, so wait on a listing row landing instead.
     await page.locator(".files-table tbody tr").first().waitFor();
     await shot("files");
 
-    // 12. Install APK.
+    // 9. Install APK.
     await page.locator("#tab-sideload").click();
     await page.getByText("Install APK", { exact: false }).first().waitFor();
     await shot("install-apk");
 
-    // 13. Snapshot (per-device).
-    await page.locator("#tab-snapshot").click();
-    await page.waitForTimeout(400);
-    await shot("snapshot");
-
-    // Logs: one explicit bounded synthetic snapshot, with no background capture.
-    await page.locator("#tab-logs").click();
-    await page.getByRole("button", { name: "Read logs", exact: true }).click();
-    await page.getByLabel("Log output").waitFor();
-    await shot("logs");
-
-    // 14. Shell runner.
+    // 10. ADB Console (power-user shell + background-activity log).
+    await page.locator("#tab-console").click();
+    await page.getByText("ADB Console", { exact: false }).first().waitFor();
+    await page.getByText("Background activity", { exact: false }).first().waitFor();
+    await page.waitForTimeout(300);
+    await shot("console");
     await page.locator("#tab-shell").click();
-    await page.getByText("Disabled packages", { exact: false }).first().waitFor();
+    await page.getByRole("textbox", { name: "Shell command" }).waitFor();
     await shot("shell");
+    await page.locator("#tab-tweaks").click();
+    await page.getByRole("heading", { name: "System Tweaks" }).waitFor();
+    await shot("advanced-tweaks");
 
-    // 15. Global snapshots page.
+    // 11. Global snapshots page.
     await page.goto(`${BASE}/snapshots`, { waitUntil: "networkidle" });
     await page.waitForTimeout(500);
     await shot("snapshots");
@@ -160,7 +161,7 @@ async function captureScreens(page, shot) {
 
 async function main() {
   console.log("Starting dev server (demo mode)…");
-  const server = spawn("npm", ["run", "dev", "--", "--port", String(PORT)], {
+  const server = spawn(process.execPath, [join(V2, "node_modules/vite/bin/vite.js"), "--port", String(PORT)], {
     cwd: V2,
     env: { ...process.env, VITE_DEMO: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -183,17 +184,18 @@ async function main() {
         deviceScaleFactor: 2, // crisp retina PNGs
         colorScheme: scheme.name, // drives prefers-color-scheme → app "Auto"
       });
+      await context.addInitScript((recentDevice) => {
+        localStorage.setItem("shieldopt.recentNetworkDevices", JSON.stringify([recentDevice]));
+      }, RECENT_DEVICE);
       const page = await context.newPage();
+      page.on("pageerror", (err) => console.error(`[pageerror] ${err.message}`));
 
       let n = 0;
       const shot = async (name) => {
         n += 1;
         const file = join(scheme.dir, `${String(n).padStart(2, "0")}-${name}.png`);
         await page.waitForTimeout(450); // let layout/fonts settle
-        // SHOT_FULLPAGE=1 captures everything below the fold too. Off by
-        // default: the gallery wants a window, not a long strip. It is how you
-        // review a screen's whole length without scrolling by hand.
-        await page.screenshot({ path: file, fullPage: process.env.SHOT_FULLPAGE === "1" });
+        await page.screenshot({ path: file });
         console.log(`  ✓ ${file}`);
       };
 

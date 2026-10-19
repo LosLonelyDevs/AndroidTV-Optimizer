@@ -16,16 +16,37 @@ pub struct InstallApkResult {
     pub message: String,
     /// Optional decoded hint for common failure codes.
     pub hint: Option<String>,
+    /// Package id read from the APK's manifest. Populated only when the
+    /// downgrade fallback comes into play — it's the one path where the UI
+    /// needs a package id it may not already have (a file picked outside the
+    /// scanned folder has no row, and so no decoded manifest).
+    pub package: Option<String>,
+    /// The install went through with `-d` (allow downgrade) — either because
+    /// the caller asked for it, or because a plain attempt tripped the
+    /// downgrade guard and we retried.
+    pub downgraded: bool,
+    /// Android refused the downgrade even with `-d`. It only honors that flag
+    /// for debuggable apps (or on a debuggable build), so on a retail device
+    /// the only remaining route is uninstall-then-install — which erases the
+    /// app's data, so the UI asks before taking it.
+    pub downgrade_blocked: bool,
 }
 
-/// `install_apk` — `adb -s <serial> install [-r] <path>`. The frontend uses
-/// the dialog plugin to obtain a file path before calling this.
+/// `install_apk` — `adb -s <serial> install [-r] [-d] <path>`. The frontend
+/// uses the dialog plugin to obtain a file path before calling this.
+///
+/// `allow_downgrade` adds `-d`, which is what lets an older APK replace a
+/// newer install. Callers that already know they're downgrading (the folder
+/// list compares manifest `versionCode` against the device) pass it up front;
+/// everyone else gets one automatic retry when the plain attempt comes back
+/// `INSTALL_FAILED_VERSION_DOWNGRADE`.
 #[tauri::command]
 pub async fn install_apk(
     state: State<'_, AppState>,
     serial: String,
     apk_path: String,
     reinstall: Option<bool>,
+    allow_downgrade: Option<bool>,
 ) -> Result<InstallApkResult, String> {
     let path_buf = PathBuf::from(&apk_path);
     if !path_buf.is_file() {
@@ -34,27 +55,34 @@ pub async fn install_apk(
             path: apk_path,
             message: "APK file does not exist".to_string(),
             hint: None,
+            package: None,
+            downgraded: false,
+            downgrade_blocked: false,
         });
     }
 
     let adb = state.adb_snapshot().await;
-    let mut args: Vec<String> = vec!["-s".into(), serial.clone(), "install".into()];
-    if reinstall.unwrap_or(true) {
-        args.push("-r".into());
-    }
-    args.push(apk_path.clone());
-    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let reinstall = reinstall.unwrap_or(true);
+    let mut downgrade = allow_downgrade.unwrap_or(false);
 
-    let out = adb
-        .raw_transfer(&args_ref)
-        .await
-        .map_err(|e| format!("adb install: {e}"))?;
-    let combined = if out.stdout.trim().is_empty() {
-        out.stderr.clone()
+    let mut combined = run_install(adb.as_ref(), &serial, &apk_path, reinstall, downgrade).await?;
+    let mut ok = combined.contains("Success");
+
+    if !ok && !downgrade && combined.contains("INSTALL_FAILED_VERSION_DOWNGRADE") {
+        downgrade = true;
+        combined = run_install(adb.as_ref(), &serial, &apk_path, reinstall, true).await?;
+        ok = combined.contains("Success");
+    }
+
+    let downgrade_blocked = !ok && combined.contains("INSTALL_FAILED_VERSION_DOWNGRADE");
+    let package = if downgrade_blocked {
+        tokio::task::spawn_blocking(move || read_apk_manifest(&path_buf).package)
+            .await
+            .ok()
+            .flatten()
     } else {
-        out.stdout.clone()
+        None
     };
-    let ok = combined.contains("Success");
     let hint = decode_install_error(&combined);
 
     Ok(InstallApkResult {
@@ -62,7 +90,51 @@ pub async fn install_apk(
         path: apk_path,
         message: combined,
         hint,
+        package,
+        downgraded: ok && downgrade,
+        downgrade_blocked,
     })
+}
+
+/// One `adb install` attempt. Returns adb's output — stdout when it wrote
+/// anything, stderr otherwise, since install failures land on either depending
+/// on the platform-tools version.
+async fn run_install(
+    adb: &dyn crate::adb::AdbDriver,
+    serial: &str,
+    apk_path: &str,
+    reinstall: bool,
+    allow_downgrade: bool,
+) -> Result<String, String> {
+    let args = install_args(serial, apk_path, reinstall, allow_downgrade);
+    let out = adb
+        .raw_transfer(&args)
+        .await
+        .map_err(|e| format!("adb install: {e}"))?;
+    Ok(if out.stdout.trim().is_empty() {
+        out.stderr
+    } else {
+        out.stdout
+    })
+}
+
+/// Build the `adb install` argv. Split out from `run_install` so the flag
+/// combinations stay testable without a device.
+fn install_args<'a>(
+    serial: &'a str,
+    apk_path: &'a str,
+    reinstall: bool,
+    allow_downgrade: bool,
+) -> Vec<&'a str> {
+    let mut args = vec!["-s", serial, "install"];
+    if reinstall {
+        args.push("-r");
+    }
+    if allow_downgrade {
+        args.push("-d");
+    }
+    args.push(apk_path);
+    args
 }
 
 #[derive(Serialize)]
@@ -73,32 +145,78 @@ pub struct DiscoveredApk {
     /// Package id read from the APK's AndroidManifest.xml, when decodable.
     /// Lets the UI flag APKs that are already installed on the device.
     pub package: Option<String>,
+    /// `android:versionCode` from the manifest — the integer Android compares
+    /// for upgrade/downgrade decisions. Checked against the installed copy so
+    /// the UI can label a row Upgrade / Downgrade / Reinstall instead of a flat
+    /// "installed".
+    pub version_code: Option<i64>,
+    /// `android:versionName` — the human version string (e.g. "4.71.3"), for
+    /// display only.
+    pub version_name: Option<String>,
 }
 
-/// Read the `package` attribute from an APK's binary `AndroidManifest.xml`.
-/// Returns `None` if the file isn't a readable APK or the manifest can't be
-/// decoded — best-effort; the install flow doesn't depend on it.
-fn read_apk_package_id(apk_path: &std::path::Path) -> Option<String> {
-    let file = std::fs::File::open(apk_path).ok()?;
-    let mut zip = zip::ZipArchive::new(file).ok()?;
-    let mut manifest = zip.by_name("AndroidManifest.xml").ok()?;
+/// Package id + version fields decoded from an APK's `AndroidManifest.xml`.
+struct ApkManifestInfo {
+    package: Option<String>,
+    version_code: Option<i64>,
+    version_name: Option<String>,
+}
+
+/// Read `package`, `versionCode`, and `versionName` from an APK's binary
+/// `AndroidManifest.xml`. Best-effort: any field that can't be decoded comes
+/// back `None`, and a file that isn't a readable APK yields an all-`None`
+/// result — the install flow doesn't depend on it.
+fn read_apk_manifest(apk_path: &std::path::Path) -> ApkManifestInfo {
+    let empty = ApkManifestInfo {
+        package: None,
+        version_code: None,
+        version_name: None,
+    };
+    let Ok(file) = std::fs::File::open(apk_path) else {
+        return empty;
+    };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else {
+        return empty;
+    };
+    let Ok(mut manifest) = zip.by_name("AndroidManifest.xml") else {
+        return empty;
+    };
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut manifest, &mut bytes).ok()?;
-    let doc = axmldecoder::parse(&bytes).ok()?;
-    if let Some(axmldecoder::Node::Element(root)) = doc.get_root() {
-        if root.get_tag() == "manifest" {
-            // The manifest is attacker-controlled, and this id is later
-            // interpolated into a device-side shell command (`pm list
-            // packages <id>`) before the user has confirmed anything. An id
-            // that is not a well-formed package name is treated as unreadable.
-            return trusted_package_id(root.get_attributes().get("package").cloned());
-        }
+    if std::io::Read::read_to_end(&mut manifest, &mut bytes).is_err() {
+        return empty;
     }
-    None
+    let Ok(doc) = axmldecoder::parse(&bytes) else {
+        return empty;
+    };
+    let Some(axmldecoder::Node::Element(root)) = doc.get_root() else {
+        return empty;
+    };
+    if root.get_tag() != "manifest" {
+        return empty;
+    }
+    let attrs = root.get_attributes();
+    // Namespaced attributes decode as `android:versionCode` when the manifest
+    // keeps attribute-name strings, or the bare `versionCode` when they've been
+    // stripped to resource ids — check both.
+    let attr = |name: &str| -> Option<String> {
+        attrs
+            .get(name)
+            .or_else(|| attrs.get(format!("android:{name}").as_str()))
+            .cloned()
+    };
+    ApkManifestInfo {
+        package: trusted_package_id(attr("package")),
+        version_code: attr("versionCode").and_then(|v| v.parse::<i64>().ok()),
+        version_name: attr("versionName").filter(|v| !v.is_empty()),
+    }
 }
 
 fn trusted_package_id(raw: Option<String>) -> Option<String> {
     raw.filter(|pkg| shield_optimizer_core::engine::is_valid_package_name(pkg))
+}
+
+fn read_apk_package_id(path: &std::path::Path) -> Option<String> {
+    read_apk_manifest(path).package
 }
 
 /// What an APK claims about itself, read locally before anything is installed.
@@ -263,12 +381,14 @@ pub async fn list_apks_in_folder(folder: String) -> Result<Vec<DiscoveredApk>, S
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let package = read_apk_package_id(&path);
+        let info = read_apk_manifest(&path);
         out.push(DiscoveredApk {
             path: path.display().to_string(),
             name,
             size_bytes: metadata.len(),
-            package,
+            package: info.package,
+            version_code: info.version_code,
+            version_name: info.version_name,
         });
         if out.len() >= 50 {
             break;
@@ -289,7 +409,7 @@ pub(crate) fn decode_install_error(text: &str) -> Option<String> {
         ),
         (
             "INSTALL_FAILED_VERSION_DOWNGRADE",
-            "Installed version is newer than this APK. Uninstall the device's copy first, or use a newer APK.",
+            "Installed version is newer than this APK, and Android refused the downgrade even with `-d` (it only honors that for debuggable apps). Uninstall the device's copy first — that erases its data — or use a newer APK.",
         ),
         (
             "INSTALL_FAILED_ALREADY_EXISTS",
@@ -321,7 +441,7 @@ pub(crate) fn decode_install_error(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_install_error, trusted_package_id};
+    use super::{decode_install_error, install_args, trusted_package_id};
 
     #[test]
     fn a_manifest_package_id_with_shell_syntax_is_treated_as_unreadable() {
@@ -336,6 +456,22 @@ mod tests {
             Some("org.smarttube.stable".to_string())
         );
         assert_eq!(trusted_package_id(None), None);
+    }
+
+    #[test]
+    fn install_args_add_downgrade_flag_only_when_asked() {
+        assert_eq!(
+            install_args("ABC", "/tmp/a.apk", true, false),
+            ["-s", "ABC", "install", "-r", "/tmp/a.apk"]
+        );
+        assert_eq!(
+            install_args("ABC", "/tmp/a.apk", true, true),
+            ["-s", "ABC", "install", "-r", "-d", "/tmp/a.apk"]
+        );
+        assert_eq!(
+            install_args("ABC", "/tmp/a.apk", false, true),
+            ["-s", "ABC", "install", "-d", "/tmp/a.apk"]
+        );
     }
 
     #[test]
