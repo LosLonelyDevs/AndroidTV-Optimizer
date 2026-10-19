@@ -7,7 +7,7 @@
 //! command body run exactly as in the desktop app. Only the adb driver is
 //! swapped for `SimulatedAdb`.
 //!
-//! Built only with `--features e2e`. See `v2/e2e/README.md`.
+//! Built only with `--features e2e --example e2e_server`. See `v2/e2e/README.md`.
 //!
 //! ```text
 //! e2e_server [--port N] [--fixtures DIR]

@@ -1,0 +1,39 @@
+# Reviewed public upstream fixtures and source, imported from ae0436e.
+# These categories match example ADB endpoints and Android package IDs.
+docs/gastown-shield_optimizer-beads-export.json high-entropy
+v2/crates/core/data/app-lists/known-names.json internal-hostname
+v2/crates/core/src/adb/parse.rs internal-service
+v2/crates/core/src/adb/sim/device.rs internal-hostname
+v2/crates/core/src/commands/devices.rs internal-service
+v2/crates/core/src/commands/screenshot.rs internal-service
+v2/crates/core/src/engine/diagnostics.rs internal-service
+v2/crates/core/src/engine/snapshot.rs internal-service
+v2/crates/core/tests/fixtures/devices/*/dumpsys-diskstats.txt internal-hostname
+v2/crates/core/tests/fixtures/devices/*/pm-list-packages*.txt internal-hostname
+v2/e2e/scenarios/10-devices.mjs internal-service
+v2/mobile/PAIRING-PLAN.md internal-service
+# The high-entropy match is a checkout path in a public build receipt.
+v2/mobile/evidence/lifecycle/baseline-48cba23.json high-entropy
+v2/mobile/tests/discoveryRows.test.mjs internal-service
+v2/mobile/tests/savedDevices.test.mjs internal-service
+v2/mobile/tests/unknownDiagnostics.test.mjs internal-hostname
+v2/mobile/tests/unknownDiagnostics.test.mjs internal-service
+v2/screenshots/capture.mjs internal-service
+v2/src-tauri/src/adb/driver.rs internal-service
+v2/src-tauri/src/commands/install.rs internal-service
+v2/src-tauri/src/commands/scan.rs internal-service
+v2/src/lib/demo-mock.ts internal-service
+v2/src/routes/+page.svelte internal-service
+v2/tests/adb-errors.mjs internal-service
+v2/tests/app-report.mjs internal-service
+v2/tests/context-menu.mjs internal-service
+v2/tests/device-list-rows.mjs internal-service
+v2/tests/files-drop.mjs internal-service
+v2/tests/icon-alignment.mjs internal-service
+v2/tests/pairing-flow.mjs internal-service
+v2/tests/report-bug.mjs internal-service
+# Intentionally vendored, licensed ADB library; the key is in test_pubkey_gen.
+v2/vendor/adb_client/** sensitive-filename
+v2/vendor/adb_client/src/message_devices/models/adb_rsa_key.rs private-key
+v2/vendor/adb_client/src/models/adb_command.rs internal-service
+v2/vendor/adb_client/src/server/models/device_long.rs internal-service

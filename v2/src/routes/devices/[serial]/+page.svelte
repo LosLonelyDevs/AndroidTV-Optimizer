@@ -3,7 +3,7 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { Channel } from "@tauri-apps/api/core";
   import { api } from "$lib/api";
   import type {
@@ -17,54 +17,51 @@
     ApplyResult,
     RecoveryResult,
     RebootMode,
-    OtherPackage,
+    InstalledPackage,
+    RiskTier,
     ScreenshotResult,
-    ResourceSample,
     Safety,
+    StorageUsage,
   } from "$lib/types";
   import { deviceTypeLabel } from "$lib/types";
-  import type { MemoryEntry } from "$lib/types";
-  import { getKeptPackages, setPackageKept, getShellAcknowledged, setShellAcknowledged, idKey } from "$lib/prefs";
-  import Icon from "$lib/components/Icon.svelte";
-  import {
-    isBlocked,
-    safetyClass,
-    safetyLabel,
-    safetyReason,
-    verdictLabel,
-    type SafetyStatus,
-  } from "$lib/safety";
-  import {
-    canOfferUninstall,
-    isReinstallable,
-    recommendation,
-    sideloadSource,
-    uninstallNote,
-    type Recommendation,
-  } from "$lib/recommendation";
-  import AppRow from "$lib/components/AppRow.svelte";
-  import {
-    idleMeasurements,
-    loadingMeasurements,
-    reportLiveState,
-    settled,
-    type AppDetailInputs,
-    type AppMeasurements,
-  } from "$lib/app-details";
+  import { formatBytes, basename } from "$lib/format";
+  import { recommendation as sharedRecommendation, type Recommendation } from "$lib/recommendation";
+  import RamBadge from "$lib/components/RamBadge.svelte";
+  import UsageBadge from "$lib/components/UsageBadge.svelte";
+  import StateBadge from "$lib/components/StateBadge.svelte";
+  import RiskBadge from "$lib/components/RiskBadge.svelte";
+  import AppRow from "$lib/components/DesktopAppRow.svelte";
+  import { idleMeasurements, loadingMeasurements, settled, type AppDetailInputs } from "$lib/app-details";
   import { reportFamily } from "$lib/app-report";
+  import MediaTab from "$lib/components/MediaTab.svelte";
+  import LogsTab from "$lib/components/LogsTab.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { getKeptPackages, setPackageKept, getShellAcknowledged, setShellAcknowledged, idKey } from "$lib/prefs";
+  import ShellTab from "$lib/components/ShellTab.svelte";
+  import AdvancedTweaksTab from "$lib/components/AdvancedTweaksTab.svelte";
   import FilesTab from "$lib/components/FilesTab.svelte";
   import TweaksTab from "$lib/components/TweaksTab.svelte";
   import SideloadTab from "$lib/components/SideloadTab.svelte";
   import RemoteTab from "$lib/components/RemoteTab.svelte";
   import OptimizeTab from "$lib/components/OptimizeTab.svelte";
-  import MediaTab from "$lib/components/MediaTab.svelte";
-  import LogsTab from "$lib/components/LogsTab.svelte";
-  import ShellTab from "$lib/components/ShellTab.svelte";
+  import DisplayTab from "$lib/components/DisplayTab.svelte";
+  import AudioTab from "$lib/components/AudioTab.svelte";
+  import SystemTab from "$lib/components/SystemTab.svelte";
+  import ConsoleTab from "$lib/components/ConsoleTab.svelte";
 
   let serial = $derived(decodeURIComponent($page.params.serial ?? ""));
 
-  type Tab = "overview" | "health" | "media" | "launcher" | "apps" | "optimize" | "tweaks" | "remote" | "files" | "snapshot" | "sideload" | "shell" | "logs";
+  type Tab = "overview" | "health" | "apps" | "optimize" | "settings" | "remote" | "files" | "sideload" | "console" | "media" | "logs" | "shell" | "tweaks";
+  /// Sub-tabs of Settings. Ids match the `visited` keys and the per-tab lazy
+  /// loaders they had as top-level tabs; only the display label differs
+  /// ("Device" for `system`, since "Settings › System" reads as a tautology).
+  type SettingsSub = "display" | "audio" | "input" | "system";
   let activeTab = $state<Tab>("overview");
+  let activeSettingsSub = $state<SettingsSub>("display");
+  /// The Settings sub-tab actually on screen, or null when Settings isn't the
+  /// active tab. Lazy loaders and cache invalidation key off this rather than
+  /// `activeTab`, which no longer names these panels.
+  let settingsSubActive = $derived(activeTab === "settings" ? activeSettingsSub : null);
 
   let device = $state<Device | null>(null);
   let deviceErr = $state<string | null>(null);
@@ -77,103 +74,42 @@
   // the next time the Memory tab is opened.
   let healthStale = $state(false);
   let reportLastRefreshed = $state<Date | null>(null);
+  let resourceSample = $state<import("$lib/types").ResourceSample | null>(null);
+  let resourceLoading = $state(false);
+  let resourceErr = $state<string | null>(null);
+  let alive = true;
+  let resourceRequest = 0;
+
+  // Storage drill-down. Kept out of the health report because it walks the
+  // filesystem with `du` — the user asks for it, it doesn't ride along on
+  // every 3-second live refresh.
+  let usage = $state<StorageUsage | null>(null);
+  let usagePath = $state("/sdcard");
+  let usageLoading = $state(false);
+  let usageErr = $state<string | null>(null);
   let liveRefresh = $state(false);
   let liveRefreshTimer: ReturnType<typeof setInterval> | null = null;
   const LIVE_REFRESH_INTERVAL_MS = 3000;
-  type PackageState = "enabled" | "disabled" | "missing";
-  type PageContext = { serial: string; epoch: number };
-  /// Keyed by the full process name.
-  let memorySafety = $state<Record<string, SafetyStatus>>({});
-  /// Installed packages on this device, for confirming a memory row's package.
-  let memoryConfirmed = $state<Set<string>>(new Set());
-  /// Package whose safety detail is expanded in the App List, or null. One at a
-  /// time: the verdict is a single line, and the reasoning behind it is worth
-  /// reading properly rather than skimming twelve at once.
-  let expandedSafety = $state<string | null>(null);
-  let packageSafety = $state<Record<string, SafetyStatus>>({});
-  /// Packages the user has decided to keep on THIS device. An opinion, not
-  /// device state — it never touches a snapshot, and it is keyed by hardware
-  /// id so it cannot leak between two TVs that swapped addresses.
-  let keptPackages = $state<Set<string>>(new Set());
-  /// Hides rows that are already decided — kept, or already disabled/removed —
-  /// so the list works as a shrinking worklist.
-  let hideDecided = $state(false);
-
-  /// A placeholder serial (`unknown`, blank) identifies nothing: two such TVs
-  /// would share Keep choices and expert-shell consent. The backend treats
-  /// the same values as absent.
-  function realHardwareId(raw: string | null | undefined): string | null {
-    const id = raw?.trim() ?? "";
-    if (!id || id.toLowerCase() === "unknown") return null;
-    return id;
-  }
-  const hardwareId = $derived(realHardwareId(device?.properties?.serial_number));
-
-  function toggleKept(pkg: string) {
-    keptPackages = new Set(setPackageKept(hardwareId, pkg, !keptPackages.has(pkg)));
-  }
-  let pageEpoch = $state(0);
-  let deviceRequest = 0;
-  let healthRequest = 0;
-  let appsRequest = 0;
-  let otherRequest = 0;
-  let enrichmentRequest = 0;
-  let mutationRequest = 0;
-  let destroyed = false;
-
-  let profileCopied = $state(false);
-
-  /// The whole spec sheet as text, for pasting into a bug report.
-  async function copyProfile() {
-    const p = device?.properties;
-    if (!p) return;
-    const lines = [
-      `Friendly name: ${shown(p.friendly_name)}`,
-      `Brand: ${shown(p.brand)}`,
-      `Model: ${shown(p.model)}`,
-      `Codename: ${shown(p.device_codename)}`,
-      `Manufacturer: ${shown(p.manufacturer)}`,
-      `Android version: ${shown(p.android_release)} (SDK ${shown(p.sdk_level)})`,
-      `Build ID: ${shown(p.build_id)}`,
-      `Board platform: ${shown(p.board_platform)}`,
-      `Hardware ID: ${shown(p.serial_number)}`,
-    ];
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      profileCopied = true;
-      setTimeout(() => (profileCopied = false), 2000);
-    } catch {
-      /* clipboard unavailable — the values are all on screen anyway */
-    }
-  }
-
-  /// Safety for one row of the memory report.
-  ///
-  /// A name the device reports as an installed package gets that package's
-  /// verdict — the same one the App List shows, so the two screens cannot
-  /// disagree about one app. A name we cannot tie to an installed package
-  /// stays a process: catalog-free classification only, and it is shown as
-  /// "Not an app" rather than as a verdict. tests/memory-safety.mjs pins that
-  /// an unverified name never reads as Safe to remove.
-  async function memorySafetyFor(m: MemoryEntry, installed: Set<string>): Promise<Safety> {
-    const pkg = confirmedPackage(m, installed);
-    return pkg ? api.safetyInfo(pkg) : api.processSafetyInfo(m.process);
-  }
-
-  /// The row's package, only once the device has confirmed it is installed.
-  /// `com.foo:remote` is com.foo's process; `media.codec` only looks like a
-  /// package, and stays a process because nothing by that name is installed.
-  function confirmedPackage(m: MemoryEntry, installed: Set<string>): string | null {
-    return m.package !== null && installed.has(m.package) ? m.package : null;
-  }
-
-  function capturePageContext(): PageContext {
-    return { serial, epoch: pageEpoch };
-  }
-
-  function pageContextIsCurrent(context: PageContext): boolean {
-    return !destroyed && context.serial === serial && context.epoch === pageEpoch;
-  }
+  // Keepalive: the adb daemon silently drops an idle TCP device (Shield
+  // network standby, Wi-Fi power save, router idle timers) and never
+  // reconnects on its own. A cheap ping keeps the session warm while this
+  // page is open — and because the driver reconnects-and-retries on a lost
+  // transport, the same ping re-registers the device the moment it's
+  // reachable again after a sleep.
+  const KEEPALIVE_INTERVAL_MS = 45_000;
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  /// Cached safety classifications for the visible memory-table rows. Populated
+  /// in batch whenever the health report refreshes so each row knows whether
+  /// the Disable button should be hard-blocked.
+  let safetyMap = $state<Record<string, Safety>>({});
+  let processSafetyMap = $state<Record<string, Safety>>({});
+  /// Packages the user has manually declared safe on THIS device (persisted
+  /// per device identity in `safety-overrides.json`). Layered over `safetyMap`
+  /// so a Caution / curated risk badge the user has decided they understand
+  /// stops shouting. Never includes NEVER_DISABLE packages — the backend
+  /// refuses to add them.
+  let safetyOverrides = $state<Record<string, boolean>>({});
+  let overrideBusy = $state<string | null>(null);
 
   let renaming = $state(false);
   let renameValue = $state("");
@@ -182,7 +118,13 @@
   let screenshotBusy = $state(false);
   let screenshot = $state<ScreenshotResult | null>(null);
 
+  let recordingBusy = $state(false);
+  let recording = $state(false);
+  let recordMsg = $state("");
+  let recordPath = $state<string | null>(null);
+
   let trimBusy = $state(false);
+  let killBusy = $state(false);
   let trimMessage = $state("");
 
   let launchers = $state<LauncherStatus[]>([]);
@@ -196,83 +138,39 @@
   let launcherErr = $state<string | null>(null);
   let launcherActionBusy = $state<string | null>(null); // package id currently being acted on
   let launcherActionMessage = $state("");
-  /// Per-stage record from the last failed launcher switch, offered as a copy
-  /// button. Kept out of the message itself — it is for a bug report, not for
-  /// reading on screen.
-  let launcherDiagnostics = $state<string[]>([]);
-  let launcherDiagnosticsCopied = $state(false);
   let launcherProgress = $state(""); // live per-step status while a switch is in flight
-  /// "Open Play Store on TV" worked; the list re-polls until the app shows up.
-  let storeOpened = $state<{ pkg: string; name: string } | null>(null);
-  let storePollTimer: ReturnType<typeof setInterval> | null = null;
-  /// Advanced "Set another app as Home…": every installed app, not just the
-  /// ones that declare a Home screen. Taking over from stock is its own step.
-  let homePickerPackages = $state<OtherPackage[]>([]);
-  let homePickerLoading = $state(false);
-  let homePickerErr = $state<string | null>(null);
+  let homePickerPackages = $state<InstalledPackage[]>([]);
   let homePickerChoice = $state("");
-  let homePickerActivity = $state("");
-  let homePickerBusy = $state<"set" | "stock" | null>(null);
   let homePickerMessage = $state("");
-  let homePickerOk = $state(false);
-  let stockConfirmOpen = $state(false);
+  let stockConfirmTarget = $state<string | null>(null);
 
   let apps = $state<AppEntry[]>([]);
   let appsLoaded = $state(false);
   let appsLoading = $state(false);
   let appsErr = $state<string | null>(null);
-  /// Missing or invalid entries stay absent: absence means inventory unavailable.
-  let appStates = $state<Record<string, PackageState>>({});
-  /// True while appStates is being re-read after a run that changed the
-  /// device. The cached states may predate the run, so nothing reports them.
-  let appStatesResyncing = $state(false);
-  let appStatesResync = 0;
-  /// True after a run changed the device while the App List inventory was not
-  /// loaded, so there was nothing to re-read. Cleared when it next loads.
-  let statesUnreadAfterRun = $state(false);
-  /// True after a run changed the device since "Everything else" was read.
-  /// Only the catalog is re-read after a run, so those rows' states may
-  /// predate it until that list is loaded again.
-  let othersStaleAfterRun = $state(false);
-  let deviceRuns = 0;
-
-  function noteDeviceRun() {
-    deviceRuns++;
-    othersStaleAfterRun = true;
-  }
-
-  /// True from the moment an Optimize run starts until the page takes over
-  /// with its post-run re-read. Packages change one by one during the run, so
-  /// no cached state is reported for any of them until then.
-  let optimizeRunActive = $state(false);
-
-  function optimizeRunStarted() {
-    noteDeviceRun();
-    optimizeRunActive = true;
-  }
-
-  /// Hand the run's guard to the post-run flags. A run that ended without
-  /// its own re-read leaves every state unread until the inventory is.
-  function endOptimizeRun(reRead: boolean) {
-    if (!optimizeRunActive) return;
-    optimizeRunActive = false;
-    noteDeviceRun();
-    if (!reRead) statesUnreadAfterRun = true;
-  }
-  let catalogInventoryVersion = 0;
+  /// package → 'enabled' | 'disabled' | 'missing' — refreshed alongside the app list.
+  let appStates = $state<Record<string, "enabled" | "disabled" | "missing">>({});
   let appSearch = $state("");
+  let expandedApp = $state<string | null>(null);
   // Default on: the catalog lists ~70 known apps, most not present on any given
   // device, so an unfiltered list is mostly un-actionable "Missing" rows. Start
   // focused on what's installed; unticking reveals the full catalog.
   let hideNotInstalled = $state(true);
-  let showSystemOthers = $state(false);
-  /// Installed packages not in the curated catalog (sideloaded apps like
-  /// SmartTube + system internals). Loaded lazily on the Apps tab.
-  let otherPackages = $state<OtherPackage[]>([]);
+  /// Which kinds of app the single table shows. Every row is exactly one kind:
+  /// curated (in the catalog) → user-installed → system. The default pair is
+  /// what's actionable — the curated bloat list plus whatever you sideloaded —
+  /// with the several-hundred-package system tail behind its own chip.
+  let kindFilter = $state<Record<AppKind, boolean>>({
+    curated: true,
+    user: true,
+    system: false,
+  });
+  /// Only rows the Optimize wizard would act on (or flag for review).
+  let onlyRecommended = $state(false);
+  /// Every package installed on the device, catalog and not. Loaded lazily on
+  /// the Apps tab.
+  let installedPackages = $state<InstalledPackage[]>([]);
   let othersLoading = $state(false);
-  let othersLoaded = $state(false);
-  let othersErr = $state<string | null>(null);
-  let otherInventoryVersion = 0;
   /// package → resident RAM (MB) for apps running right now. Lazy-loaded after
   /// the list paints; most apps aren't here (not running), so a value means the
   /// app is actively holding RAM — the cue for "disable this unused app".
@@ -280,41 +178,29 @@
   /// package → last-used / launch count, lazy-loaded alongside RAM. Powers the
   /// "remove if unused" signal (never opened / months idle).
   let appUsage = $state<Record<string, import("$lib/types").AppUsage>>({});
-  /// package → installed storage (disk, not RAM), from one `dumpsys diskstats`.
+  /// Device uptime in seconds. `dumpsys usagestats` is rebuilt at boot, so this
+  /// bounds how far back `appUsage` can see — without it a rebooted device
+  /// reports every app as unused.
+  let usageWindowSecs = $state<number | null>(null);
   let appStorage = $state<Record<string, import("$lib/types").AppStorage>>({});
-  /// Whether each of the three reads above landed, and when. An empty map
-  /// beside an unavailable read means "we don't know", never "nothing".
-  let appMeasures = $state<AppMeasurements>(idleMeasurements());
-
+  let appMeasures = $state(idleMeasurements());
+  let keptPackages = $state<Set<string>>(new Set());
+  let appMutationInFlight = $state(false);
+  let inventoryGeneration = 0;
+  let measuresRequest = 0;
+  const hardwareId = $derived(idKey(device?.properties?.serial_number));
+  let shellAcknowledged = $state(false);
+  let shellAckResolvedFor: string | null = null;
+  let mediaResetToken = $state(0);
+  $effect(() => {
+    const identity = hardwareId ?? serial;
+    if (identity === shellAckResolvedFor) return;
+    shellAckResolvedFor = identity;
+    shellAcknowledged = getShellAcknowledged(hardwareId);
+    keptPackages = getKeptPackages(hardwareId);
+  });
   function appDetails(pkg: string): AppDetailInputs {
-    return {
-      serial,
-      measures: appMeasures,
-      memoryMb: appMemory[pkg],
-      usage: appUsage[pkg],
-      storage: appStorage[pkg],
-      onRemeasure: () => void loadAppMemory(),
-      // A catalog package the page has no current state for is unknown, not
-      // whatever an older row last said.
-      liveState: reportLiveState(
-        apps.some((a) => a.package === pkg),
-        appStates[pkg],
-        appStatesResyncing,
-        statesUnreadAfterRun || optimizeRunActive,
-        othersStaleAfterRun,
-      ),
-      report: device
-        ? {
-            family: reportFamily(device.device_type, device.tv_evidence),
-            androidVersion: device.properties?.android_release ?? null,
-            // A placeholder ro.serialno ("unknown") identifies nothing, and
-            // scrubbing it would eat that word from the user's note.
-            redact: [serial, device.serial, idKey(device.properties?.serial_number)].filter(
-              (id): id is string => !!idKey(id),
-            ),
-          }
-        : undefined,
-    };
+    return { serial, measures: appMeasures, memoryMb: appMemory[pkg], usage: appUsage[pkg], storage: appStorage[pkg], liveState: appMutationInFlight ? null : appStates[pkg] ?? null, onRemeasure: loadAppMemory, report: device ? { family: reportFamily(device.device_type, device.tv_evidence), androidVersion: device.properties?.android_release ?? null, redact: [serial, device.properties?.serial_number ?? ""] } : undefined };
   }
 
   function matchesSearch(name: string, pkg: string): boolean {
@@ -323,27 +209,77 @@
     return name.toLowerCase().includes(q) || pkg.toLowerCase().includes(q);
   }
 
-  let visibleApps = $derived(
-    apps.filter((a) => {
-      if (hideNotInstalled && appStates[a.package] === "missing") return false;
-      // "Decided" is kept-by-you or already off the device; hiding both turns
-      // the list into a worklist that shrinks as you work.
-      if (hideDecided) {
-        const st = appStates[a.package];
-        if (keptPackages.has(a.package) || st === "disabled" || st === "missing") return false;
+  /// One row of the App List, whatever the package's provenance. Curated rows
+  /// carry their `AppEntry` so the Recommended column and the risk hovercard
+  /// keep working; the long tail leaves it null.
+  type AppKind = "curated" | "user" | "system";
+  type AppListRow = {
+    package: string;
+    name: string;
+    kind: AppKind;
+    state: "enabled" | "disabled" | "missing";
+    entry: AppEntry | null;
+    risk?: RiskTier;
+    description?: string;
+    review: boolean;
+    playStore: boolean;
+  };
+
+  /// Every catalog app (installed or not) plus every non-catalog installed
+  /// package, as one list. Catalog entries come first so the actionable rows
+  /// stay at the top; the tail keeps the backend's user-before-system order.
+  let allRows = $derived.by((): AppListRow[] => {
+    const catalogRows: AppListRow[] = apps.map((a) => ({
+      package: a.package,
+      name: a.name,
+      kind: "curated",
+      state: appStates[a.package] ?? "enabled",
+      entry: a,
+      risk: a.risk,
+      description: a.optimize_description,
+      review: a.review ?? false,
+      playStore: a.play_store,
+    }));
+    const tailRows: AppListRow[] = installedPackages
+      .filter((p) => !p.catalog)
+      .map((p) => ({
+        package: p.package,
+        name: p.name ?? p.package,
+        kind: p.system ? "system" : "user",
+        state: p.enabled ? "enabled" : "disabled",
+        entry: null,
+        // The long tail has no curated rating; the risk pill falls back to the
+        // safety map, which is what drives its color and hovercard anyway.
+        risk: undefined,
+        review: false,
+        playStore: false,
+      }));
+    return [...catalogRows, ...tailRows];
+  });
+
+  let visibleRows = $derived(
+    allRows.filter((r) => {
+      if (!kindFilter[r.kind]) return false;
+      if (hideNotInstalled && r.state === "missing") return false;
+      if (onlyRecommended) {
+        const rec = rowRecommendation(r);
+        if (rec.kind !== "act" && rec.kind !== "review" && rec.kind !== "restore") return false;
       }
-      return matchesSearch(a.name, a.package);
+      return matchesSearch(r.name, r.package);
     }),
   );
-  let visibleOthers = $derived(
-    otherPackages.filter((o) => {
-      if (!showSystemOthers && o.system) return false;
-      return matchesSearch(o.name ?? o.package, o.package);
-    }),
-  );
+
+  /// Row counts per kind, for the filter chips — always over the unfiltered set
+  /// so a chip tells you what turning it on would reveal.
+  let kindCounts = $derived({
+    curated: allRows.filter((r) => r.kind === "curated").length,
+    user: allRows.filter((r) => r.kind === "user").length,
+    system: allRows.filter((r) => r.kind === "system").length,
+  });
   let appActionBusy = $state<string | null>(null);
   let appActionMessage = $state("");
-  let appMutationInFlight = $state(false);
+  /// Package whose per-row Actions dropdown is open (one at a time).
+  let appMenuOpen = $state<string | null>(null);
   /// Package the "Copy to another device" panel is open for, plus targets.
   let clonePkg = $state<string | null>(null);
   let cloneTargets = $state<Device[]>([]);
@@ -378,42 +314,32 @@
   // this token (after an App List action, snapshot apply, or panic recovery)
   // tells the tab to drop that stale plan and reload fresh next run.
   let optimizeResetToken = $state(0);
-  let mediaResetToken = $state(0);
-  /// Remembered per TV by hardware id, and only in this page's state for a TV
-  /// without one. Resolved once per identity and written back on every change —
-  /// never re-read over live state. It used to be re-read inside `loadApps`,
-  /// after an await, so the tick vanished the moment the App List or Health
-  /// refreshed underneath it.
-  let shellAcknowledged = $state(false);
-  let shellAckResolvedFor: string | null = null;
-  $effect(() => {
-    const identity = hardwareId ?? serial;
-    if (identity === shellAckResolvedFor) return;
-    shellAckResolvedFor = identity;
-    shellAcknowledged = getShellAcknowledged(hardwareId);
-    // Optimize reads Keep choices too, and can be opened before the App List
-    // or Health ever load; resolve them here so a kept app is never armed.
-    keptPackages = getKeptPackages(hardwareId);
-  });
 
   async function loadDevice() {
-    const context = capturePageContext();
-    const request = ++deviceRequest;
     deviceErr = null;
     try {
-      const nextDevice = await api.deviceProfile(context.serial);
-      if (!pageContextIsCurrent(context) || request !== deviceRequest) return;
-      // The key was a transport alias the device list collapsed into this row
-      // (matched on hardware id by the backend). Move to the row's own key so
-      // every later command, and the clone-target list, agree on one device.
-      if (nextDevice.serial !== context.serial) {
-        void goto(`/devices/${encodeURIComponent(nextDevice.serial)}`, { replaceState: true });
-        return;
+      device = await api.deviceProfile(serial);
+      // Remember the device we're actively on so the next app launch can
+      // reconnect and reopen it. Keyed on serial (== ip:port for network
+      // devices) — exactly what the home page navigates back to.
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("shieldopt.lastDeviceSerial", serial);
       }
-      device = nextDevice;
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== deviceRequest) return;
       deviceErr = String(e);
+    }
+  }
+
+  // Settings the user pinned that Android drops on reboot (background process
+  // limit, chiefly). The device can't restore them itself, so we do it here on
+  // connect. No-op unless something actually drifted.
+  let reapplyMessage = $state("");
+  async function reapplyBootTweaks() {
+    try {
+      const r = await api.reapplyBootTweaks(serial);
+      if (r.reapplied.length > 0 || !r.ok) reapplyMessage = r.message;
+    } catch {
+      // Best-effort: a failure here must never block the device page.
     }
   }
 
@@ -423,10 +349,7 @@
     try {
       const r = await api.trimCaches(serial);
       trimMessage = r.ok ? "App caches cleared." : r.message.trim();
-      if (r.ok) {
-        refreshMeasurements();
-        await loadHealth();
-      }
+      if (r.ok) await loadHealth();
     } catch (e) {
       trimMessage = String(e);
     } finally {
@@ -434,164 +357,223 @@
     }
   }
 
-  // CPU + network rates, fetched separately from the health report: the
-  // sample needs a one-second device-side window, and making every refresh
-  // wait for it would make the whole tab feel slow.
-  let resource = $state<ResourceSample | null>(null);
-  let resourceLoading = $state(false);
+  async function killBackground() {
+    killBusy = true;
+    trimMessage = "";
+    try {
+      const r = await api.killAllBackground(serial);
+      trimMessage = r.ok
+        ? "Background apps killed — RAM frees up now; apps restart on next use."
+        : r.message.trim();
+      if (r.ok) await loadHealth();
+    } catch (e) {
+      trimMessage = String(e);
+    } finally {
+      killBusy = false;
+    }
+  }
 
-  /// Fastest inbound interface in the last sample — the one worth a tile.
-  /// Ties and empty samples give null, which the tile renders as a dash.
-  const busiest = $derived(
-    (resource?.interfaces ?? [])
-      .filter((n) => n.rx_bytes_per_s != null)
-      .sort((a, b) => (b.rx_bytes_per_s ?? 0) - (a.rx_bytes_per_s ?? 0))[0] ?? null,
-  );
-  const busiestRate = $derived(busiest?.rx_bytes_per_s ?? null);
-  const busiestName = $derived(busiest?.name ?? null);
-
-  /// Shared by the RAM tile and the RAM meter, which now live in two separate
-  /// cards and must not drift apart.
-  const ramPct = $derived(
-    report?.ram.total_mb && report.ram.used_mb != null
-      ? Math.round((report.ram.used_mb / report.ram.total_mb) * 100)
-      : null,
-  );
-  const ramFreeMb = $derived(
-    report?.ram.total_mb != null && report?.ram.used_mb != null
-      ? report.ram.total_mb - report.ram.used_mb
-      : null,
-  );
-
-  let resourceErr = $state<string | null>(null);
-  let resourceRequest = 0;
+  async function loadHealth() {
+    void loadResourceSample();
+    reportLoading = true;
+    reportErr = null;
+    try {
+      const [health, inventory, catalog] = await Promise.all([
+        api.healthReport(serial),
+        api.listInstalledPackages(serial).catch(() => []),
+        device ? api.appListForDevice(device.device_type) : Promise.resolve([]),
+      ]);
+      const installed = new Set(inventory.map((p) => p.package));
+      report = { ...health, top_memory: health.top_memory.map((m) => ({ ...m, package: m.package && installed.has(m.package) ? m.package : null })) };
+      apps = catalog;
+      processSafetyMap = Object.fromEntries(await Promise.all(report.top_memory.filter((m) => !m.package).map(async (m) => [m.process, await api.processSafetyInfo(m.process)] as const)));
+      reportLastRefreshed = new Date();
+      // Resolve safety for every visible row so each one knows whether its
+      // Disable button is hard-blocked and what its risk badge should say.
+      // Both storage and memory tables show a risk badge per row, and the
+      // two lists overlap — resolve the union once.
+      await cacheSafety([
+        ...new Set([
+          ...report.top_memory.flatMap((m) => m.package ? [m.package] : []),
+          ...report.disk.packages.map((p) => p.package),
+        ]),
+      ]);
+    } catch (e) {
+      reportErr = String(e);
+    } finally {
+      reportLoading = false;
+    }
+  }
 
   async function loadResourceSample() {
     if (resourceLoading) return;
-    const context = capturePageContext();
     const request = ++resourceRequest;
     resourceLoading = true;
     resourceErr = null;
     try {
-      const sample = await api.resourceSample(context.serial);
-      if (!pageContextIsCurrent(context) || request !== resourceRequest) return;
-      resource = sample;
+      const next = await api.resourceSample(serial);
+      if (alive && request === resourceRequest) resourceSample = next;
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== resourceRequest) return;
-      resource = null;
-      resourceErr = String(e);
+      if (alive && request === resourceRequest) resourceErr = String(e);
     } finally {
-      if (pageContextIsCurrent(context) && request === resourceRequest) resourceLoading = false;
+      if (alive && request === resourceRequest) resourceLoading = false;
     }
   }
 
-  /// Colour a usage meter by how full it is. Thresholds are the same ones the
-  /// memory table already uses for its PSS column, so "amber means getting
-  /// full" reads consistently across the Health tab.
-  function meterTone(percent: number | null): string {
-    if (percent == null) return "";
-    if (percent >= 90) return "danger";
-    if (percent >= 75) return "warn";
-    return "ok";
-  }
+  // Category order is largest-to-smallest by typical share, so the stacked bar
+  // reads left to right without reordering between refreshes.
+  //
+  // `System Size` is deliberately not here. It covers the read-only system
+  // image, which isn't on /data and can't be freed — and several builds report
+  // it as a hardcoded round number (a Shield claims 16 GB against a 12 GB
+  // /data), which would swamp the bar with a figure that isn't measured.
+  const DISK_CATEGORIES = [
+    { key: "apps", label: "Apps", field: "app_bytes" },
+    { key: "data", label: "App data", field: "app_data_bytes" },
+    { key: "cache", label: "Caches", field: "app_cache_bytes" },
+    { key: "videos", label: "Videos", field: "videos_bytes" },
+    { key: "photos", label: "Photos", field: "photos_bytes" },
+    { key: "audio", label: "Audio", field: "audio_bytes" },
+    { key: "downloads", label: "Downloads", field: "downloads_bytes" },
+    { key: "other", label: "Other", field: "other_bytes" },
+  ] as const;
 
-  /// How hard the TV is paging. Only ever a claim when we know what it is a
-  /// share OF — a bare "512 MB of swap" says nothing without the total, so an
-  /// unknown total colours nothing.
-  let swapTone = $derived.by(() => {
-    const swap = report?.ram.swap_mb;
-    const total = report?.ram.total_mb;
-    if (swap == null || total == null || total <= 0) return null;
-    const share = (swap / total) * 100;
-    if (share >= 50) return "danger";
-    if (share >= 25) return "warn";
-    return null;
+  /// The bar's denominator: the /data partition. Categories can overshoot it
+  /// slightly (some builds count cache inside app data as well as separately),
+  /// so widen to their sum in that case rather than letting segments overflow.
+  const diskTotalBytes = $derived.by(() => {
+    const d = report?.disk;
+    if (!d) return 0;
+    const categories = DISK_CATEGORIES.reduce((sum, c) => sum + (c.key === "data" ? Math.max(0, (d.app_data_bytes ?? 0) - (d.app_cache_bytes ?? 0)) : (d[c.field] ?? 0)), 0);
+    return Math.max(d.data_total_bytes ?? 0, categories);
   });
 
-  /// Temperature tiers. Deliberately coarse and deliberately not device-
-  /// specific: we read a thermal zone, not the throttle point, so these are
-  /// bands for a reader rather than a claim about this TV's limit.
-  let tempTone = $derived.by(() => {
-    const c = report?.temperature_c;
-    if (c == null) return null;
-    if (c >= 76) return "danger";
-    if (c > 60) return "warn";
-    return null;
+  const diskSegments = $derived.by(() => {
+    const d = report?.disk;
+    if (!d || diskTotalBytes <= 0) return [];
+    return DISK_CATEGORIES.map((c) => ({
+      key: c.key,
+      label: c.label,
+      bytes: c.key === "data" ? Math.max(0, (d.app_data_bytes ?? 0) - (d.app_cache_bytes ?? 0)) : (d[c.field] ?? 0),
+      pct: ((c.key === "data" ? Math.max(0, (d.app_data_bytes ?? 0) - (d.app_cache_bytes ?? 0)) : (d[c.field] ?? 0)) / diskTotalBytes) * 100,
+    })).filter((s) => s.bytes > 0);
   });
 
-  let tempWord = $derived(
-    report?.temperature_c == null ? null : tempTone === "danger" ? "hot" : tempTone === "warn" ? "warm" : "fine",
-  );
+  const diskFreeBytes = $derived(report?.disk.data_free_bytes ?? 0);
 
-  /// Bytes/s → the largest unit that keeps the number readable.
-  function formatRate(bytesPerSecond: number | null): string {
-    if (bytesPerSecond == null) return "—";
-    if (bytesPerSecond < 1024) return `${bytesPerSecond} B/s`;
-    if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-    return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MB/s`;
+  /// Width of a usage row's bar, as a share of the folder being scanned. Floors
+  /// at 1% so a small entry still shows something to click next to.
+  function usagePct(bytes: number): number {
+    if (!usage || usage.total_bytes <= 0) return 0;
+    return Math.max(1, Math.round((bytes / usage.total_bytes) * 100));
   }
 
-  async function loadHealth() {
-    const context = capturePageContext();
-    const request = ++healthRequest;
-    reportLoading = true;
-    reportErr = null;
-    // Kick the sample off in parallel and let it land on its own.
-    void loadResourceSample();
-    // Deliberately NOT clearing memorySafety here: Live Refresh ticks every
-    // three seconds, and wiping the map made the whole Safety column blank to
-    // "Checking" and back twenty times a minute. A process's verdict does not
-    // change between ticks; the effect below refetches when the *set* of
-    // processes changes.
+  /// Drop the scanned folder's prefix so nested paths stay readable.
+  function relativeToScan(path: string): string {
+    return path.startsWith(`${usagePath}/`) ? path.slice(usagePath.length + 1) : path;
+  }
+
+  /// Walk one `/sdcard` directory with `du`. Confined server-side to user
+  /// storage, so a bad path is refused rather than reaching /data.
+  async function loadUsage(path = usagePath) {
+    usageLoading = true;
+    usageErr = null;
     try {
-      const nextReport = await api.healthReport(context.serial);
-      if (!pageContextIsCurrent(context) || request !== healthRequest) return;
-      report = nextReport;
-      reportLastRefreshed = new Date();
-      const rows = [
-        ...new Map(nextReport.top_memory.map((m) => [m.process, m])).values(),
-      ];
-      memorySafety = Object.fromEntries(rows.map((m) => [m.process, { status: "checking" }]));
-      // These are process names from `dumpsys meminfo`, and a process can be
-      // named anything, so a bare name must not inherit a curated verdict.
-      // But a name that matches a package the device reports as installed IS
-      // that package — Android names a process after its package by default —
-      // and for those the catalog applies legitimately. So: confirm against
-      // the installed list first, and only then ask the catalog-aware lookup.
-      // Anything we cannot confirm still gets the catalog-free classification.
-      let installed: Set<string>;
-      try {
-        installed = new Set(
-          (await api.listInstalledPackages(context.serial)).map((p) => p.package),
-        );
-      } catch {
-        // No installed list means nothing is confirmed; fall back to treating
-        // every row as an unverified process rather than guessing.
-        installed = new Set();
-      }
-      if (!pageContextIsCurrent(context) || request !== healthRequest) return;
-      memoryConfirmed = installed;
-      const results = await Promise.allSettled(
-        rows.map((m) => memorySafetyFor(m, installed)),
-      );
-      // Deliberately not comparing `report` to `nextReport`: `report` is
-      // $state, so assigning an object stores a deep proxy and the identity
-      // check is always true — which bailed out here every time and left every
-      // row stuck on "Checking". The request token already proves this load is
-      // the current one.
-      if (!pageContextIsCurrent(context) || request !== healthRequest) return;
-      memorySafety = Object.fromEntries(rows.map((m, index) => {
-        const result = results[index];
-        return result.status === "fulfilled"
-          ? [m.process, { status: "ready", verdict: result.value } satisfies SafetyStatus]
-          : [m.process, { status: "unavailable", reason: String(result.reason) } satisfies SafetyStatus];
-      }));
+      const next = await api.storageUsage(serial, path);
+      usage = next;
+      usagePath = next.path;
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== healthRequest) return;
-      reportErr = String(e);
+      usageErr = String(e);
     } finally {
-      if (pageContextIsCurrent(context) && request === healthRequest) reportLoading = false;
+      usageLoading = false;
     }
+  }
+
+  /// `/sdcard/Movies/Home` → the crumbs to walk back up. `/sdcard` is the
+  /// root; nothing above it is reachable.
+  const usageCrumbs = $derived.by(() => {
+    const parts = usagePath.replace(/^\/sdcard\/?/, "").split("/").filter(Boolean);
+    const crumbs = [{ label: "/sdcard", path: "/sdcard" }];
+    let acc = "/sdcard";
+    for (const part of parts) {
+      acc = `${acc}/${part}`;
+      crumbs.push({ label: part, path: acc });
+    }
+    return crumbs;
+  });
+
+  /// Delete one file or folder from the storage panel, then re-walk so the
+  /// totals reflect what's actually left.
+  async function deleteFromUsage(path: string) {
+    if (!confirm(`Delete ${path} from the device?
+
+This is permanent — there is no trash on Android.`)) return;
+    usageLoading = true;
+    try {
+      const r = await api.deletePath(serial, path);
+      if (!r.ok) usageErr = r.message;
+      await loadUsage(usagePath);
+    } catch (e) {
+      usageErr = String(e);
+    } finally {
+      usageLoading = false;
+    }
+  }
+
+  /// Uninstall from the storage table. Same guarded path as the App List, plus
+  /// a local row drop so the freed space is visible before the next refresh.
+  async function uninstallFromStorage(pkg: string) {
+    await uninstallApp(pkg);
+    if (appStates[pkg] === "missing" && report) {
+      report.disk.packages = report.disk.packages.filter((p) => p.package !== pkg);
+    }
+  }
+
+  /// Load the user's manual "safe" declarations for THIS device. The backend
+  /// keys them by the device's stable identity (Android ID), so the same
+  /// physical device keeps its marks across reconnects and IP changes.
+  /// Best-effort — a failure just means no overrides are applied.
+  async function loadSafetyOverrides() {
+    try {
+      const list = await api.listSafetyOverrides(serial);
+      const map: Record<string, boolean> = {};
+      for (const p of list) map[p] = true;
+      safetyOverrides = map;
+    } catch {
+      // Non-fatal; the memory table falls back to the raw classification.
+    }
+  }
+
+  /// Toggle a package's manual "safe" declaration from its risk hovercard. The
+  /// backend returns the device's full updated list (and rejects NEVER_DISABLE
+  /// packages), so we just replace our local copy from its response.
+  async function toggleSafetyOverride(pkg: string) {
+    const currentlySafe = !!safetyOverrides[pkg];
+    overrideBusy = pkg;
+    try {
+      const list = await api.setSafetyOverride(serial, pkg, !currentlySafe);
+      const map: Record<string, boolean> = {};
+      for (const p of list) map[p] = true;
+      safetyOverrides = map;
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      overrideBusy = null;
+    }
+  }
+
+  /// Batch-resolve engine safety classifications into `safetyMap` for any
+  /// packages not already cached. Pure const-list lookups on the backend —
+  /// cheap enough to fire for whole tables.
+  async function cacheSafety(pkgs: string[]) {
+    const missing = pkgs.filter((p) => !safetyMap[p]);
+    if (missing.length === 0) return;
+    const results = await Promise.all(
+      missing.map((p) => api.safetyInfo(p).catch(() => ({ kind: "safe" }) as Safety)),
+    );
+    const next = { ...safetyMap };
+    results.forEach((s, i) => (next[missing[i]] = s));
+    safetyMap = next;
   }
 
   function toggleLiveRefresh() {
@@ -636,17 +618,11 @@
   });
 
   onDestroy(() => {
-    destroyed = true;
-    pageEpoch++;
-    deviceRequest++;
-    healthRequest++;
-    appsRequest++;
-    otherRequest++;
-    enrichmentRequest++;
-    mutationRequest++;
+    alive = false;
+    resourceRequest++;
     if (liveRefreshTimer) clearInterval(liveRefreshTimer);
     if (nowTicker) clearInterval(nowTicker);
-    stopStorePoll();
+    if (keepaliveTimer) clearInterval(keepaliveTimer);
   });
 
   async function loadLauncher() {
@@ -671,409 +647,227 @@
 
   async function loadApps() {
     if (!device) return;
-    const context = capturePageContext();
-    const request = ++appsRequest;
-    otherRequest++;
-    enrichmentRequest++;
-    mutationRequest++;
-    catalogInventoryVersion++;
-    otherInventoryVersion++;
-    const deviceType = device.device_type;
+    const generation = inventoryGeneration;
     appsLoading = true;
     appsErr = null;
-    appsLoaded = false;
-    apps = [];
-    appStates = {};
-    packageSafety = {};
-    otherPackages = [];
-    othersLoaded = false;
-    othersLoading = false;
-    othersErr = null;
-    appMemory = {};
-    appUsage = {};
-    appStorage = {};
-    appMeasures = idleMeasurements();
-    if (appMutationInFlight) appActionBusy = null;
-    appActionMessage = "";
     try {
-      const list = await api.appListForDevice(deviceType);
-      if (!pageContextIsCurrent(context) || request !== appsRequest) return;
+      // Pull the app list AND fresh enabled/disabled state for those packages.
+      // The package state lets us render per-row Disable/Enable/Uninstall
+      // buttons in their correct state.
+      const list = await api.appListForDevice(device.device_type);
       apps = list;
-      const packages = list.map((a) => a.package);
-      // Merge, never replace. "Everything else" writes into this same map from
-      // its own async loader, and a whole-object assignment here dropped every
-      // verdict that loader had already resolved — leaving those rows with no
-      // entry at all, which renders as "Safety unavailable · could not be
-      // checked" with nothing to say why, because there was no failure.
-      packageSafety = {
-        ...packageSafety,
-        ...Object.fromEntries(packages.map((pkg) => [pkg, { status: "checking" }])),
-      };
-      const [stateResult, safetyResults] = await Promise.all([
-        api.packageStates(context.serial, packages),
-        Promise.allSettled(packages.map((pkg) => api.safetyInfo(pkg))),
-      ]);
-      if (!pageContextIsCurrent(context) || request !== appsRequest) return;
-      appStates = validatedPackageStates(packages, stateResult);
-      statesUnreadAfterRun = false;
-      keptPackages = getKeptPackages(hardwareId);
-      catalogInventoryVersion++;
-      const unavailableCount = packages.length - Object.keys(appStates).length;
-      if (unavailableCount > 0) appsErr = `State unavailable for ${unavailableCount} package(s). Refresh before taking action.`;
-      packageSafety = {
-        ...packageSafety,
-        ...Object.fromEntries(packages.map((pkg, index) => {
-          const result = safetyResults[index];
-          return result.status === "fulfilled"
-            ? [pkg, { status: "ready", verdict: result.value } satisfies SafetyStatus]
-            : [pkg, { status: "unavailable", reason: String(result.reason) } satisfies SafetyStatus];
-        })),
-      };
-      appsLoaded = true;
+      const states = await fetchAppStates(list.map((a) => a.package));
+      if (generation !== inventoryGeneration) return;
+      appStates = states;
+      // Fire-and-forget: risk badges fall back to the catalog tier until the
+      // engine classifications land.
+      cacheSafety(list.map((a) => a.package));
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== appsRequest) return;
-      appsErr = `Inventory unavailable: ${e}. Refresh to retry.`;
-      appsLoaded = true;
+      appsErr = String(e);
     } finally {
-      if (pageContextIsCurrent(context) && request === appsRequest) appsLoading = false;
+      appsLoading = false;
+      appsLoaded = true;
     }
-    if (pageContextIsCurrent(context) && request === appsRequest) {
-      void loadOtherPackages();
-      void loadAppMemory();
-    }
+    loadInstalledPackages();
+    loadAppMemory();
   }
 
-  /// Lazy RAM, last-used and storage annotations: one `dumpsys meminfo`, one
-  /// `dumpsys usagestats` and one `dumpsys diskstats`, mapped onto the rows.
-  /// Run after the list paints and never block it. Each read records when it
-  /// landed or why it failed, so the detail panel can say "unavailable" rather
-  /// than let an empty map read as zero.
+  /// Lazy RAM + last-used annotations: one `dumpsys meminfo` and one
+  /// `dumpsys usagestats`, mapped onto the rows. Run after the list paints and
+  /// never block it — a failure just leaves those cues off.
   async function loadAppMemory() {
-    const context = capturePageContext();
-    const request = ++enrichmentRequest;
+    const request = ++measuresRequest;
     appMeasures = loadingMeasurements();
     const [mem, usage, storage] = await Promise.allSettled([
-      api.appMemoryMap(context.serial),
-      api.appUsageMap(context.serial),
-      api.appStorageMap(context.serial),
+      api.appMemoryMap(serial),
+      api.appUsageMap(serial),
+      api.appStorageMap(serial),
     ]);
-    if (!pageContextIsCurrent(context) || request !== enrichmentRequest) return;
-    const at = Date.now();
+    if (request !== measuresRequest) return;
     appMemory = mem.status === "fulfilled" ? mem.value : {};
-    appUsage = usage.status === "fulfilled" ? usage.value : {};
+    appUsage = usage.status === "fulfilled" ? usage.value.entries : {};
+    usageWindowSecs = usage.status === "fulfilled" ? usage.value.window_secs : null;
     appStorage = storage.status === "fulfilled" ? storage.value : {};
-    appMeasures = {
-      memory: settled(mem, at),
-      usage: settled(usage, at),
-      storage: settled(storage, at),
-    };
+    const at = Date.now();
+    appMeasures = { memory: settled(mem, at), usage: settled(usage, at), storage: settled(storage, at) };
   }
 
-  // Everything installed that isn't in the curated catalog — sideloaded apps
-  // (SmartTube etc.) plus system internals. Loaded after the catalog so the
-  // curated list paints first; failures here don't block the main list.
-  async function loadOtherPackages() {
-    const context = capturePageContext();
-    const request = ++otherRequest;
-    const runsAtStart = deviceRuns;
-    mutationRequest++;
-    otherInventoryVersion++;
-    if (appMutationInFlight) appActionBusy = null;
-    appActionMessage = "";
+  // Every package on the device — the curated catalog's own rows come from
+  // `loadApps`, this fills in the long tail plus the system/user flag. Loaded
+  // after the catalog so the actionable list paints first; failures here don't
+  // block the main list.
+  async function loadInstalledPackages() {
+    const generation = inventoryGeneration;
     othersLoading = true;
-    othersLoaded = false;
-    othersErr = null;
-    otherPackages = [];
     try {
-      const list = await api.listOtherPackages(context.serial);
-      if (!pageContextIsCurrent(context) || request !== otherRequest) return;
-      otherPackages = list;
-      othersLoaded = true;
-      if (runsAtStart === deviceRuns) othersStaleAfterRun = false;
-      otherInventoryVersion++;
-      const packages = list.map((entry) => entry.package);
-      const next = { ...packageSafety };
-      packages.forEach((pkg) => (next[pkg] = { status: "checking" }));
-      packageSafety = next;
-      const results = await Promise.allSettled(packages.map((pkg) => api.safetyInfo(pkg)));
-      if (!pageContextIsCurrent(context) || request !== otherRequest) return;
-      const resolved = { ...packageSafety };
-      packages.forEach((pkg, index) => {
-        const result = results[index];
-        resolved[pkg] = result.status === "fulfilled"
-          ? { status: "ready", verdict: result.value }
-          : { status: "unavailable", reason: String(result.reason) };
-      });
-      packageSafety = resolved;
+      const next = await api.listInstalledPackages(serial);
+      if (generation !== inventoryGeneration) return;
+      installedPackages = next;
+      appStates = { ...appStates, ...Object.fromEntries(next.map((p) => [p.package, p.enabled ? "enabled" as const : "disabled" as const])) };
+      cacheSafety(installedPackages.map((o) => o.package));
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== otherRequest) return;
-      othersErr = `Other-package inventory unavailable: ${e}. Refresh to retry.`;
+      appActionMessage = `Could not list installed packages: ${e}`;
     } finally {
-      if (pageContextIsCurrent(context) && request === otherRequest) othersLoading = false;
+      othersLoading = false;
     }
   }
 
   function patchOtherState(pkg: string, enabled: boolean | "removed") {
     if (enabled === "removed") {
-      otherPackages = otherPackages.filter((o) => o.package !== pkg);
+      installedPackages = installedPackages.filter((o) => o.package !== pkg);
     } else {
-      otherPackages = otherPackages.map((o) => (o.package === pkg ? { ...o, enabled } : o));
+      installedPackages = installedPackages.map((o) => (o.package === pkg ? { ...o, enabled } : o));
     }
-    otherInventoryVersion++;
   }
 
-  function catalogStateIsCurrent(pkg: string, state: PackageState, version: number): boolean {
-    return version === catalogInventoryVersion
-      && apps.some((entry) => entry.package === pkg)
-      && appStates[pkg] === state;
-  }
-
-  function otherStateIsCurrent(pkg: string, enabled: boolean, version: number): boolean {
-    return version === otherInventoryVersion
-      && othersLoaded
-      && otherPackages.some((entry) => entry.package === pkg && entry.enabled === enabled);
-  }
-
-  async function disableOther(pkg: string) {
-    await removeInstalledPackage("other", pkg, "disable");
-  }
-
-  async function enableOther(pkg: string) {
-    if (appActionBusy || appMutationInFlight) return;
-    const context = capturePageContext();
-    const request = ++mutationRequest;
-    const inventoryVersion = otherInventoryVersion;
-    if (!otherStateIsCurrent(pkg, false, inventoryVersion)) {
-      appActionMessage = `${pkg}: we couldn't read the current disabled state. Refresh to retry.`;
-      return;
-    }
-    appMutationInFlight = true;
+  async function clearCacheFor(pkg: string) {
     appActionBusy = pkg;
     appActionMessage = "";
     try {
-      const r = await api.enablePackage(context.serial, pkg);
-      if (!pageContextIsCurrent(context) || request !== mutationRequest || !otherStateIsCurrent(pkg, false, inventoryVersion)) return;
-      appActionMessage = `${pkg}: ${r.message.trim() || (r.ok ? "enabled" : "failed")}`;
-      if (r.ok) {
-        appActionBusy = null;
-        patchOtherState(pkg, true);
-        invalidateDeviceCaches();
-      } else {
-        // Not-ok can still have landed (stock enabled, its setup helper not).
-        invalidateDeviceCaches();
-        void resyncAfterBulkChange();
-      }
+      const r = await api.clearAppCache(serial, pkg);
+      appActionMessage = `${pkg}: ${r.message.trim() || (r.ok ? "cache cleared" : "failed")}`;
+      if (r.ok) invalidateDeviceCaches();
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== mutationRequest || !otherStateIsCurrent(pkg, false, inventoryVersion)) return;
       appActionMessage = `${pkg}: ${e}`;
     } finally {
-      appMutationInFlight = false;
-      if (pageContextIsCurrent(context)
-        && request === mutationRequest
-        && otherStateIsCurrent(pkg, false, inventoryVersion)
-        && appActionBusy === pkg) appActionBusy = null;
+      appActionBusy = null;
     }
   }
 
-  async function uninstallOther(pkg: string) {
-    await removeInstalledPackage("other", pkg, "uninstall");
+  async function clearDataFor(pkg: string) {
+    if (
+      !confirm(
+        `Clear all data for ${pkg}?\n\nThis wipes its accounts, settings, and downloads — the app resets to a fresh install. Not reversible.`,
+      )
+    )
+      return;
+    appActionBusy = pkg;
+    appActionMessage = "";
+    try {
+      const r = await api.clearAppData(serial, pkg);
+      appActionMessage = `${pkg}: ${r.message.trim() || (r.ok ? "data cleared" : "failed")}`;
+      if (r.ok) invalidateDeviceCaches();
+    } catch (e) {
+      appActionMessage = `${pkg}: ${e}`;
+    } finally {
+      appActionBusy = null;
+    }
   }
+
 
   // Real state per package — one batched backend call (pm list packages +
   // pm list packages -d in parallel) so we can show Enabled/Disabled/Missing.
-  function validatedPackageStates(packages: string[], value: unknown): Record<string, PackageState> {
-    const result: Record<string, PackageState> = {};
-    if (!value || typeof value !== "object" || Array.isArray(value)) return result;
-    const record = value as Record<string, unknown>;
-    for (const pkg of packages) {
-      const state = record[pkg];
-      if (state === "enabled" || state === "disabled" || state === "missing") result[pkg] = state;
-    }
-    return result;
-  }
-
-  async function fetchAppStates(context: PageContext, packages: string[]): Promise<Record<string, PackageState>> {
+  async function fetchAppStates(packages: string[]): Promise<Record<string, "enabled" | "disabled" | "missing">> {
     if (packages.length === 0) return {};
-    return validatedPackageStates(packages, await api.packageStates(context.serial, packages));
+    try {
+      return await api.packageStates(serial, packages);
+    } catch {
+      const out: Record<string, "enabled" | "disabled" | "missing"> = {};
+      for (const p of packages) out[p] = "enabled";
+      return out;
+    }
   }
 
   /// Re-sync the App List's cached states after the Optimize wizard runs —
   /// it cached states before the run, same as executeOptimize used to do inline.
-  function beginStatesResync(): number {
-    appStatesResyncing = true;
-    return ++appStatesResync;
-  }
-
-  function endStatesResync(token: number) {
-    if (token === appStatesResync) appStatesResyncing = false;
-  }
-
   async function resyncAppStates() {
-    const context = capturePageContext();
-    const request = ++appsRequest;
-    noteDeviceRun();
-    if (apps.length === 0) statesUnreadAfterRun = true;
-    const resync = apps.length > 0 ? beginStatesResync() : null;
-    optimizeRunActive = false;
-    if (resync !== null) {
-      try {
-        const packages = apps.map((a) => a.package);
-        const next = await fetchAppStates(context, packages);
-        if (!pageContextIsCurrent(context) || request !== appsRequest) return;
-        appStates = next;
-        catalogInventoryVersion++;
-        appsErr = Object.keys(next).length === packages.length
-          ? null
-          : "Some package states are unavailable. Refresh before taking action.";
-      } catch (e) {
-        if (!pageContextIsCurrent(context) || request !== appsRequest) return;
-        appStates = {};
-        appsErr = `Inventory unavailable: ${e}. Refresh to retry.`;
-      } finally {
-        endStatesResync(resync);
-      }
+    const generation = ++inventoryGeneration;
+    appMutationInFlight = true;
+    appStates = {};
+    try {
+    if (apps.length > 0) {
+      const states = await fetchAppStates(apps.map((a) => a.package));
+      if (generation !== inventoryGeneration) return;
+      appStates = states;
+    }
+    await loadInstalledPackages();
+    } finally {
+      if (generation === inventoryGeneration) appMutationInFlight = false;
     }
     // The Optimize wizard can disable launchers and many packages — mark the
     // Launcher and Memory caches stale so they reload fresh on next visit.
     invalidateDeviceCaches();
   }
 
-  type RemovalSource = "catalog" | "other";
-  type RemovalAction = "disable" | "uninstall";
-
-  function removalSourceIsCurrent(source: RemovalSource, pkg: string, version: number): boolean {
-    if (source === "catalog") {
-      return version === catalogInventoryVersion
-        && apps.some((entry) => entry.package === pkg)
-        && (appStates[pkg] === "enabled" || appStates[pkg] === "disabled");
-    }
-    return version === otherInventoryVersion
-      && othersLoaded
-      && otherPackages.some((entry) => entry.package === pkg);
+  /// Lookup a package in the loaded app catalog (if it's there) for risk-aware
+  /// prompts when disabling from the memory table — where the user picked a
+  /// process by RAM, not a curated bloat entry.
+  function catalogEntry(pkg: string): AppEntry | undefined {
+    return apps.find((a) => a.package === pkg);
   }
 
-  function removalName(source: RemovalSource, pkg: string): string {
-    return source === "catalog"
-      ? apps.find((entry) => entry.package === pkg)?.name ?? pkg
-      : otherPackages.find((entry) => entry.package === pkg)?.name ?? pkg;
-  }
-
-  async function readRemovalEvidence(context: PageContext, pkg: string): Promise<{ state: PackageState; safety: Safety }> {
-    const [rawStates, safety] = await Promise.all([
-      api.packageStates(context.serial, [pkg]),
-      api.safetyInfo(pkg),
-    ]);
-    const state = validatedPackageStates([pkg], rawStates)[pkg];
-    if (state !== "enabled" && state !== "disabled") {
-      throw new Error("Current installed-state evidence is unavailable");
-    }
-    return { state, safety };
-  }
-
-  async function removeInstalledPackage(source: RemovalSource, pkg: string, action: RemovalAction) {
-    if (appActionBusy || appMutationInFlight) return;
-    const displayedSafety = packageSafety[pkg];
-    if (displayedSafety?.status !== "ready") {
-      appActionMessage = `${pkg}: safety unavailable. Refresh before ${action}.`;
-      return;
-    }
-    if (isBlocked(displayedSafety.verdict)) {
-      appActionMessage = `${pkg}: protected — ${displayedSafety.verdict.reason}`;
-      return;
-    }
-    const context = capturePageContext();
-    const request = ++mutationRequest;
-    const inventoryVersion = source === "catalog" ? catalogInventoryVersion : otherInventoryVersion;
-    if (!removalSourceIsCurrent(source, pkg, inventoryVersion)) {
-      appActionMessage = `${pkg}: we couldn't read the current package list. Refresh to retry.`;
-      return;
-    }
-    const name = removalName(source, pkg);
-    appMutationInFlight = true;
+  async function forceStopFromMemory(pkg: string) {
     appActionBusy = pkg;
     appActionMessage = "";
     try {
-      const before = await readRemovalEvidence(context, pkg);
-      if (!pageContextIsCurrent(context)
-        || request !== mutationRequest
-        || !removalSourceIsCurrent(source, pkg, inventoryVersion)) return;
-      if (isBlocked(before.safety)) {
-        appActionMessage = `${pkg}: protected — ${before.safety.reason}`;
-        return;
-      }
-      if (before.safety.kind !== displayedSafety.verdict.kind
-        || before.safety.reason !== displayedSafety.verdict.reason) {
-        appActionMessage = `${pkg}: safety changed. Refresh and review before ${action}.`;
-        return;
-      }
-      // A sideload the store cannot give back: offer the backup before the
-      // uninstall, while there is still something to back up.
-      const sideload = action === "uninstall" ? sideloadSource(pkg) : null;
-      if (sideload && confirm(
-        `Back up ${name}'s APK before uninstalling it?\n\n${name} isn't on the Play Store. To get it back you would reinstall it from ${sideload.url}. A backup keeps this exact version.\n\nOK: choose a folder and back it up first.\nCancel: continue without a backup.`,
-      )) {
-        const folder = await openDialog({ directory: true, title: `Choose a folder for the ${name} APK backup` });
-        if (!folder) {
-          appActionMessage = `${pkg}: backup cancelled — nothing was uninstalled.`;
-          return;
-        }
-        const backup = await api.backupApk(context.serial, pkg, folder as string);
-        if (!pageContextIsCurrent(context)
-          || request !== mutationRequest
-          || !removalSourceIsCurrent(source, pkg, inventoryVersion)) return;
-        if (!backup.ok) {
-          appActionMessage = `${pkg}: backup failed, so nothing was uninstalled — ${backup.message}`;
-          return;
-        }
-      }
-      const entry = apps.find((a) => a.package === pkg) ?? null;
-      const note = action === "uninstall" ? uninstallNote(pkg, entry) : null;
-      const approved = confirm(
-        `${action.toUpperCase()} ${name}\nPackage: ${pkg}\nSafety: ${verdictLabel(before.safety)}\nReason: ${before.safety.reason}${note ? `\n\n${note}` : ""}\n\nProceed?`,
-      );
-      if (!approved
-        || !pageContextIsCurrent(context)
-        || request !== mutationRequest
-        || !removalSourceIsCurrent(source, pkg, inventoryVersion)) return;
-      const after = await readRemovalEvidence(context, pkg);
-      if (!pageContextIsCurrent(context)
-        || request !== mutationRequest
-        || !removalSourceIsCurrent(source, pkg, inventoryVersion)) return;
-      if (isBlocked(after.safety)
-        || after.safety.kind !== before.safety.kind
-        || after.safety.reason !== before.safety.reason) {
-        appActionMessage = `${pkg}: safety changed after confirmation. No action was taken; refresh and review again.`;
-        return;
-      }
-      const result = action === "disable"
-        ? await api.disablePackage(context.serial, pkg)
-        : await api.uninstallPackage(context.serial, pkg);
-      if (!pageContextIsCurrent(context)
-        || request !== mutationRequest
-        || !removalSourceIsCurrent(source, pkg, inventoryVersion)) return;
-      appActionMessage = `${pkg}: ${result.message.trim() || (result.ok ? action === "disable" ? "disabled" : "uninstalled" : "failed")}`;
-      // A not-ok result can still have landed (stock disabled but its setup
-      // helper left on), so re-read the device rather than guess.
-      if (!result.ok) {
-        invalidateDeviceCaches();
-        void resyncAfterBulkChange();
-        return;
-      }
-      appActionBusy = null;
-      if (source === "catalog") setCatalogState(pkg, action === "disable" ? "disabled" : "missing");
-      else patchOtherState(pkg, action === "disable" ? false : "removed");
-      invalidateDeviceCaches();
+      const r = await api.forceStop(serial, pkg);
+      appActionMessage = r.ok
+        ? `${pkg} stopped — its RAM frees up now (it restarts on next launch). Refresh the report to see the change.`
+        : `Couldn't stop ${pkg}: ${r.message.trim()}`;
     } catch (e) {
-      if (!pageContextIsCurrent(context)
-        || request !== mutationRequest
-        || !removalSourceIsCurrent(source, pkg, inventoryVersion)) return;
-      appActionMessage = `${pkg}: ${e}. Refresh to retry; nothing was removed without a current reading.`;
+      appActionMessage = String(e);
     } finally {
-      appMutationInFlight = false;
-      if (pageContextIsCurrent(context)
-        && request === mutationRequest
-        && removalSourceIsCurrent(source, pkg, inventoryVersion)
-        && appActionBusy === pkg) appActionBusy = null;
+      appActionBusy = null;
+    }
+  }
+
+  async function safeDisableFromMemory(pkg: string, mb: number) {
+    // Make sure the catalog is loaded so we can look up risk.
+    if (apps.length === 0 && device) {
+      try {
+        apps = await api.appListForDevice(device.device_type);
+      } catch {
+        // Lookup is best-effort; carry on with the generic warning.
+      }
+    }
+
+    // Authoritative safety check — backend will refuse never-disable
+    // packages anyway, but we surface the reason inline so the user
+    // doesn't get a confusing "Refusing to disable" message after a
+    // pointless confirm.
+    let safety: Safety;
+    try {
+      safety = await api.safetyInfo(pkg);
+    } catch {
+      appActionMessage = "Safety information is unavailable. Retry before disabling.";
+      return;
+    }
+    if (safety.kind === "never_disable") {
+      alert(`Cannot disable ${pkg}.\n\n${safety.reason}`);
+      return;
+    }
+
+    // A manual "safe" declaration softens the confirm: the user has told us
+    // they understand this package, so we drop the loud caution / high-risk
+    // warnings (the NEVER_DISABLE hard block above still can't be overridden).
+    const overridden = !!safetyOverrides[pkg];
+
+    const entry = catalogEntry(pkg);
+    let prompt = `Disable ${pkg} (${mb.toFixed(0)} MB)?\n\n`;
+    if (overridden) {
+      prompt += "✓ You marked this app safe.\n\n";
+    }
+    if (safety.kind === "caution" && !overridden) {
+      prompt += `⚠ ${safety.reason}\n\n`;
+    }
+    if (entry) {
+      prompt += `Risk tier: ${overridden ? "SAFE (marked by you)" : entry.risk.toUpperCase()}\n`;
+      prompt += `${entry.optimize_description}\n\n`;
+      if (!overridden && (entry.risk === "high" || entry.risk === "advanced")) {
+        prompt += "⚠ HIGH RISK — this may break system features. Re-enable via Emergency Recovery if something goes wrong.\n\n";
+      }
+    } else if (safety.kind === "safe" || overridden) {
+      prompt += "ℹ This package is not in the curated bloat catalog — disabling is allowed but unverified. Re-enable via Emergency Recovery if something goes wrong.\n\n";
+    }
+    prompt += "Proceed?";
+    if (!confirm(prompt)) return;
+    await disableApp(pkg);
+    // The memory table is fed by the health report's top_memory list, which
+    // disableApp doesn't touch — so the row lingered until a full refresh. A
+    // disabled app isn't running, so drop its row now (freed RAM and the rest
+    // reconcile on the next report refresh).
+    if (appStates[pkg] === "disabled" && report) {
+      report.top_memory = report.top_memory.filter((m) => m.package !== pkg);
     }
   }
 
@@ -1081,132 +875,96 @@
   /// parity: the Optimize plan baked in the old installed/disabled sets, so drop
   /// it — it reloads fresh next time the Optimize tab is opened.
   function setCatalogState(pkg: string, state: "enabled" | "disabled" | "missing") {
-    endOptimizeRun(false);
     appStates[pkg] = state;
-    catalogInventoryVersion++;
     optimizeResetToken++;
   }
 
-  async function disableApp(pkg: string) {
-    await removeInstalledPackage("catalog", pkg, "disable");
+  /// Reflect a completed action in both caches the App List reads from: the
+  /// catalog's state map and the installed-package list. One table means one
+  /// patch — a package can be in either or both, and the row must agree with
+  /// itself whichever kind it is.
+  function patchRowState(pkg: string, state: "enabled" | "disabled" | "missing") {
+    setCatalogState(pkg, state);
+    patchOtherState(pkg, state === "missing" ? "removed" : state === "enabled");
   }
 
-  async function enableApp(pkg: string) {
-    if (appActionBusy || appMutationInFlight) return;
-    const context = capturePageContext();
-    const request = ++mutationRequest;
-    const inventoryVersion = catalogInventoryVersion;
-    if (!catalogStateIsCurrent(pkg, "disabled", inventoryVersion)) {
-      appActionMessage = `${pkg}: we couldn't read the current disabled state. Refresh to retry.`;
-      return;
-    }
-    appMutationInFlight = true;
+  async function disableApp(pkg: string) {
     appActionBusy = pkg;
     appActionMessage = "";
     try {
-      const r = await api.enablePackage(context.serial, pkg);
-      if (!pageContextIsCurrent(context) || request !== mutationRequest || !catalogStateIsCurrent(pkg, "disabled", inventoryVersion)) return;
-      appActionMessage = `${pkg}: ${r.message.trim()}`;
+      const r = await api.disablePackage(serial, pkg);
+      appActionMessage = `${pkg}: ${r.message.trim() || (r.ok ? "disabled" : "failed")}`;
       if (r.ok) {
-        appActionBusy = null;
-        setCatalogState(pkg, "enabled");
+        patchRowState(pkg, "disabled");
         invalidateDeviceCaches();
-      } else {
-        // Not-ok can still have landed (stock enabled, its setup helper not).
-        invalidateDeviceCaches();
-        void resyncAfterBulkChange();
       }
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== mutationRequest || !catalogStateIsCurrent(pkg, "disabled", inventoryVersion)) return;
       appActionMessage = `${pkg}: ${e}`;
     } finally {
-      appMutationInFlight = false;
-      if (pageContextIsCurrent(context)
-        && request === mutationRequest
-        && catalogStateIsCurrent(pkg, "disabled", inventoryVersion)
-        && appActionBusy === pkg) appActionBusy = null;
+      appActionBusy = null;
+    }
+  }
+
+  async function enableApp(pkg: string) {
+    appActionBusy = pkg;
+    appActionMessage = "";
+    try {
+      const r = await api.enablePackage(serial, pkg);
+      appActionMessage = `${pkg}: ${r.message.trim() || (r.ok ? "enabled" : "failed")}`;
+      if (r.ok) {
+        patchRowState(pkg, "enabled");
+        invalidateDeviceCaches();
+      }
+    } catch (e) {
+      appActionMessage = `${pkg}: ${e}`;
+    } finally {
+      appActionBusy = null;
     }
   }
 
   async function uninstallApp(pkg: string) {
-    await removeInstalledPackage("catalog", pkg, "uninstall");
+    if (!confirm(`Uninstall ${pkg}? This is semi-reversible (Play Store reinstall or pm install-existing).`)) return;
+    appActionBusy = pkg;
+    appActionMessage = "";
+    try {
+      const r = await api.uninstallPackage(serial, pkg);
+      appActionMessage = `${pkg}: ${r.message.trim()}`;
+      if (r.ok) {
+        patchRowState(pkg, "missing");
+        invalidateDeviceCaches();
+      }
+    } catch (e) {
+      appActionMessage = `${pkg}: ${e}`;
+    } finally {
+      appActionBusy = null;
+    }
   }
 
   // Best-effort system-app re-install via `cmd package install-existing` —
   // works only for apps still present on /system. For third-party uninstalls
   // we route through the Play Store instead.
   async function reinstallApp(pkg: string) {
-    if (appActionBusy || appMutationInFlight) return;
-    const context = capturePageContext();
-    const request = ++mutationRequest;
-    const inventoryVersion = catalogInventoryVersion;
-    if (!catalogStateIsCurrent(pkg, "missing", inventoryVersion)) {
-      appActionMessage = `${pkg}: current missing-state evidence is unavailable. Refresh to retry.`;
-      return;
-    }
-    appMutationInFlight = true;
     appActionBusy = pkg;
     appActionMessage = "";
     try {
-      const r = await api.reinstallExisting(context.serial, pkg);
-      if (!pageContextIsCurrent(context) || request !== mutationRequest || !catalogStateIsCurrent(pkg, "missing", inventoryVersion)) return;
+      const r = await api.reinstallExisting(serial, pkg);
       appActionMessage = `${pkg}: ${r.message.trim()}`;
-      if (r.ok) {
-        appActionBusy = null;
-        setCatalogState(pkg, "enabled");
-        invalidateDeviceCaches();
-      } else {
-        // Not-ok can still have landed (stock enabled, its setup helper not).
-        invalidateDeviceCaches();
-        void resyncAfterBulkChange();
-      }
+      if (r.ok) patchRowState(pkg, "enabled");
     } catch (e) {
-      if (!pageContextIsCurrent(context) || request !== mutationRequest || !catalogStateIsCurrent(pkg, "missing", inventoryVersion)) return;
       appActionMessage = `${pkg}: ${e}`;
     } finally {
-      appMutationInFlight = false;
-      if (pageContextIsCurrent(context)
-        && request === mutationRequest
-        && catalogStateIsCurrent(pkg, "missing", inventoryVersion)
-        && appActionBusy === pkg) appActionBusy = null;
+      appActionBusy = null;
     }
   }
 
-  /// What Health's Suggestion column says for one memory row. An installed
-  /// catalog app gets exactly the App List's recommendation — same function,
-  /// same inputs — so the two screens cannot disagree. Another installed
-  /// package gets its verdict. A name no installed package carries is a
-  /// process, and a process is not something you remove.
-  type MemorySuggestion =
-    | { kind: "recommendation"; rec: Recommendation }
-    | { kind: "verdict"; status: SafetyStatus | undefined }
-    | { kind: "process"; status: SafetyStatus | undefined };
-
-  function memorySuggestion(m: MemoryEntry): MemorySuggestion {
-    const pkg = confirmedPackage(m, memoryConfirmed);
-    if (pkg === null) return { kind: "process", status: memorySafety[m.process] };
-    // Until the catalog lands we cannot tell a catalog app from any other
-    // package, and a verdict that flips to a recommendation a second later
-    // is a column that cannot be trusted at a glance.
-    if (!appsLoaded) return { kind: "verdict", status: { status: "checking" } };
-    const entry = apps.find((a) => a.package === pkg);
-    if (entry) {
-      return {
-        kind: "recommendation",
-        rec: recommendation(entry, appStates[pkg] ?? null, packageSafety[pkg]),
-      };
-    }
-    return { kind: "verdict", status: memorySafety[m.process] };
+  function recommendation(a: AppEntry, state: "enabled" | "disabled" | "missing"): Recommendation {
+    const verdict = safetyMap[a.package];
+    return sharedRecommendation(a, state, verdict ? { status: "ready", verdict } : { status: "checking" });
   }
 
-  /// Open the App List on exactly this package.
-  function openInAppList(pkg: string) {
-    appSearch = pkg;
-    hideNotInstalled = false;
-    hideDecided = false;
-    showSystemOthers = true;
-    expandedSafety = pkg;
-    activeTab = "apps";
+  function rowRecommendation(r: AppListRow): Recommendation {
+    if (keptPackages.has(r.package)) return { kind: "keep", label: "Kept" };
+    return r.entry ? recommendation(r.entry, r.state) : { kind: "keep", label: "No change needed" };
   }
 
   function applyRecommendation(pkg: string, action: "disable" | "uninstall") {
@@ -1284,44 +1042,14 @@
     }
   }
 
-  const ISSUES_URL = "https://github.com/bryanroscoe/shield_optimizer/issues/new";
-
-  /// The launcher-request form, with the package prefilled when the Advanced
-  /// picker holds an app the list doesn't know as a launcher.
-  function launcherRequestUrl(): string {
-    const url = new URL(ISSUES_URL);
-    url.searchParams.set("template", "launcher_request.yml");
-    const picked = homePickerPackages.find((p) => p.package === homePickerChoice);
-    if (picked && !launchers.some((l) => l.entry.package === picked.package)) {
-      url.searchParams.set("package", picked.package);
-      if (picked.name) url.searchParams.set("launcher-name", picked.name);
-    }
-    return url.toString();
-  }
-
-  /// Open a page in the desktop browser. Nothing is downloaded or installed —
-  /// the launcher catalog's "Get" links and the issue tracker both land here.
-  async function openInBrowser(url: string) {
-    try {
-      await openUrl(url);
-    } catch (e) {
-      launcherActionMessage = `Could not open ${url}: ${e}`;
-    }
-  }
-
   async function installLauncherFromStore(pkg: string) {
     launcherActionBusy = pkg;
     launcherActionMessage = "";
-    stopStorePoll();
-    storeOpened = null;
     try {
       const r = await api.openPlayStore(serial, pkg);
-      if (r.ok) {
-        storeOpened = { pkg, name: launchers.find((l) => l.entry.package === pkg)?.entry.name ?? pkg };
-        startStorePoll(pkg);
-      } else {
-        launcherActionMessage = `${pkg}: ${r.message.trim()}`;
-      }
+      launcherActionMessage = r.ok
+        ? "Opened the Play Store on the TV. Confirm the install there."
+        : `${pkg}: ${r.message.trim()}`;
     } catch (e) {
       launcherActionMessage = String(e);
     } finally {
@@ -1329,102 +1057,38 @@
     }
   }
 
-  function stopStorePoll() {
-    if (storePollTimer) clearInterval(storePollTimer);
-    storePollTimer = null;
-  }
-
-  /// The install happens on the TV, out of our sight, so look again every 5 s
-  /// for a minute and stop as soon as the app shows up.
-  function startStorePoll(pkg: string) {
-    const deadline = Date.now() + 60_000;
-    storePollTimer = setInterval(async () => {
-      if (Date.now() > deadline) return stopStorePoll();
-      if (launcherLoading || launcherActionBusy !== null) return;
-      await loadLauncher();
-      if (launchers.some((l) => l.entry.package === pkg && l.installed)) {
-        stopStorePoll();
-        storeOpened = null;
-        launcherActionMessage = `${launchers.find((l) => l.entry.package === pkg)?.entry.name ?? pkg} is installed.`;
-      }
-    }, 5_000);
-  }
-
   async function loadHomePicker() {
-    if (homePickerLoading || homePickerPackages.length > 0) return;
-    homePickerLoading = true;
-    homePickerErr = null;
     try {
-      const list = await api.listInstalledPackages(serial);
-      const unique = new Map(list.map((p) => [p.package, p]));
-      homePickerPackages = [...unique.values()].sort((a, b) =>
-        (a.name ?? a.package).localeCompare(b.name ?? b.package),
-      );
-    } catch (e) {
-      homePickerErr = String(e);
-    } finally {
-      homePickerLoading = false;
-    }
+      const packages = await api.listInstalledPackages(serial);
+      homePickerPackages = [...new Map(packages.map((app) => [app.package, app])).values()];
+      if (!homePickerChoice) homePickerChoice = currentLauncher?.package ?? homePickerPackages[0]?.package ?? "";
+    } catch (e) { homePickerMessage = String(e); }
   }
 
-  /// Last `set_home_any` said the stock launcher is what's in the way.
-  let stockHoldsHomeFor = $state<string | null>(null);
-
-  async function setHomeFromPicker() {
-    const pkg = homePickerChoice;
-    if (!pkg) return;
-    homePickerBusy = "set";
-    homePickerMessage = "";
-    stockConfirmOpen = false;
+  async function setAnyHome() {
+    if (!homePickerChoice || launcherActionBusy) return;
+    launcherActionBusy = homePickerChoice;
     try {
-      const r = await api.setHomeAny(serial, pkg, homePickerActivity.trim() || null);
-      homePickerOk = r.ok;
-      homePickerMessage = r.message;
-      stockHoldsHomeFor = r.stock_holds_home ? pkg : null;
-      launcherDiagnostics = r.ok ? [] : (r.diagnostics ?? []);
+      const result = await api.setHomeAny(serial, homePickerChoice);
+      homePickerMessage = result.message;
       await loadLauncher();
       invalidateDeviceCaches();
-    } catch (e) {
-      homePickerOk = false;
-      homePickerMessage = String(e);
-    } finally {
-      homePickerBusy = null;
-    }
+    } catch (e) { homePickerMessage = String(e); }
+    finally { launcherActionBusy = null; }
   }
 
-  async function disableStockFromPicker(saveFirst: boolean) {
-    const pkg = homePickerChoice;
-    if (!pkg) return;
-    stockConfirmOpen = false;
-    if (saveFirst) {
-      await saveSnapshot();
-      if (!saveResult.startsWith("Saved")) {
-        homePickerOk = false;
-        homePickerMessage = "The snapshot wasn't saved, so the stock launcher was left alone.";
-        return;
-      }
-    }
-    homePickerBusy = "stock";
-    homePickerMessage = "";
+  async function disableStockFromPicker() {
+    const target = stockConfirmTarget;
+    if (!target || launcherActionBusy) return;
+    stockConfirmTarget = null;
+    launcherActionBusy = target;
     try {
-      const wraithNote = takeoverTurnsOffSetupHelper
-        ? " Google TV's setup helper (Setup Wraith) was turned off too."
-        : "";
-      const r = await api.disableStockLauncher(serial, pkg);
-      homePickerOk = r.ok;
-      homePickerMessage = r.ok
-        ? `The stock launcher is disabled and ${pkg} is Home.${wraithNote} Re-enable stock from the list above any time.`
-        : (r.last_error ?? "The stock launcher was left alone.");
-      launcherDiagnostics = r.ok ? [] : (r.diagnostics ?? []);
-      stockHoldsHomeFor = null;
+      const result = await api.disableStockLauncher(serial, target);
+      homePickerMessage = result.ok ? "Stock launcher disabled; the selected app holds Home." : result.last_error ?? "Could not confirm the launcher change.";
       await loadLauncher();
-      invalidateDeviceCaches();
-    } catch (e) {
-      homePickerOk = false;
-      homePickerMessage = String(e);
-    } finally {
-      homePickerBusy = null;
-    }
+      await resyncAfterBulkChange();
+    } catch (e) { homePickerMessage = String(e); }
+    finally { launcherActionBusy = null; }
   }
 
   async function enableLauncher(pkg: string) {
@@ -1439,24 +1103,9 @@
     try {
       const r = await api.enablePackage(serial, pkg);
       if (!r.ok) {
-        launcherActionMessage = `Couldn't fully enable ${name}: ${r.message.trim() || "failed"}`;
-        // Not-ok can still have landed (stock enabled, its setup helper not).
-        await loadLauncher();
-        invalidateDeviceCaches();
+        launcherActionMessage = `Couldn't enable ${name}: ${r.message.trim() || "failed"}`;
         return;
       }
-      // Re-enabling a stock launcher undoes its takeover, which also turned
-      // off the setup helpers it is paired with (#122).
-      const pairedOff = (launchers.find((l) => l.entry.package === pkg && l.stock)?.entry.disable_with ?? []).filter(
-        (h) => launchers.some((l) => l.entry.package === h && l.installed && !l.enabled),
-      );
-      const helperFailures: string[] = [];
-      for (const helper of pairedOff) {
-        launcherProgress = "Re-enabling Google TV's setup helper";
-        const hr = await api.enablePackage(serial, helper);
-        if (!hr.ok) helperFailures.push(`${helper}: ${hr.message.trim() || "failed"}`);
-      }
-      refreshMeasurements();
       launcherProgress = "Refreshing the launcher list";
       await loadLauncher();
       // Android clears its preferred-HOME record when a launcher package's
@@ -1476,9 +1125,6 @@
       } else {
         launcherActionMessage = `${name} enabled.`;
       }
-      if (helperFailures.length > 0) {
-        launcherActionMessage += ` Couldn't re-enable Google TV's setup helper (${helperFailures.join("; ")}). Use Re-enable Setup Wraith to retry.`;
-      }
       // A launcher's enabled state changed — the Memory tab's report is now stale.
       invalidateDeviceCaches();
     } catch (e) {
@@ -1489,68 +1135,12 @@
     }
   }
 
-  /// Google TV's setup helper (Setup Wraith), whenever it is installed. A
-  /// disabled one no longer answers the HOME query, so the backend reads it
-  /// from the package lists and it stays a row either way.
-  const setupHelper = $derived(launchers.find((l) => l.setup_helper && l.installed) ?? null);
-  const stockEnabled = $derived(launchers.some((l) => l.stock && l.enabled));
-  /// "off": disabled. "on": enabled, with something else holding or able to
-  /// hold Home. "risk": enabled while stock is off. The role can still name a
-  /// custom launcher while the helper's higher priority wins Home, so the
-  /// role-derived current launcher does not clear it.
-  const setupHelperState = $derived<"off" | "on" | "risk" | null>(
-    !setupHelper
-      ? null
-      : !setupHelper.enabled
-        ? "off"
-        : stockEnabled
-          ? "on"
-          : "risk",
-  );
-  /// A takeover will also turn the setup helper off: it is enabled and an
-  /// enabled stock launcher names it in the catalog.
-  const takeoverTurnsOffSetupHelper = $derived(
-    !!setupHelper?.enabled &&
-      launchers.some(
-        (l) => l.stock && l.enabled && (l.entry.disable_with ?? []).includes(setupHelper.entry.package),
-      ),
-  );
-
-  async function turnOffSetupHelper() {
-    const row = setupHelper;
-    if (!row) return;
-    const pkg = row.entry.package;
-    launcherActionBusy = pkg;
-    launcherActionMessage = "";
-    launcherProgress = "Turning off Google TV's setup helper";
-    try {
-      const r = await api.disableSetupHelper(serial, pkg);
-      launcherActionMessage = r.ok
-        ? "Setup Wraith is off. Press Home on the TV to check it lands on your launcher."
-        : `Couldn't turn off Setup Wraith: ${r.message.trim() || "failed"}`;
-      await loadLauncher();
-      invalidateDeviceCaches();
-    } catch (e) {
-      launcherActionMessage = String(e);
-    } finally {
-      launcherActionBusy = null;
-      launcherProgress = "";
-    }
-  }
-
   async function disableLauncher(pkg: string) {
-    const row = launchers.find((l) => l.entry.package === pkg);
-    const name = row?.entry.name ?? pkg;
-    const advice = row?.other
+    const name = launchers.find((l) => l.entry.package === pkg)?.entry.name ?? pkg;
+    const advice = launchers.find((l) => l.entry.package === pkg)?.other
       ? " Tip: save a snapshot first (Snapshot tab) so you have a record of today's state."
       : "";
-    // Setup Wraith is Google TV's setup wizard. Custom-launcher guides do
-    // disable it, but it is also where Home lands when no launcher is left,
-    // and it runs first-time setup after a factory reset.
-    const question = row?.setup_helper
-      ? `Disable ${pkg}?\n\nThis is Google TV's setup wizard, not a launcher. You don't need to disable it: the app already shows your real launcher as current. Disabling it is only useful if the Home button keeps landing on a setup screen.\n\nIt stays disabled until you re-enable it here, and Android TV needs it to run first-time setup. Re-enable it before a factory reset.`
-      : `Disable ${name}? You'll lose access to it as a HOME app until you re-enable.${advice}`;
-    if (!confirm(question)) return;
+    if (!confirm(`Disable ${name}? You'll lose access to it as a HOME app until you re-enable.${advice}`)) return;
     launcherActionBusy = pkg;
     launcherActionMessage = "";
     launcherProgress = "Disabling this launcher";
@@ -1562,10 +1152,7 @@
         invalidateDeviceCaches();
         launcherActionMessage = `${name} disabled.`;
       } else {
-        launcherActionMessage = `Couldn't fully disable ${name}: ${r.message.trim() || "failed"}`;
-        // Not-ok can still have landed (stock disabled, its setup helper left on).
-        await loadLauncher();
-        invalidateDeviceCaches();
+        launcherActionMessage = `Couldn't disable ${name}: ${r.message.trim() || "failed"}`;
       }
     } catch (e) {
       launcherActionMessage = String(e);
@@ -1575,23 +1162,10 @@
     }
   }
 
-  async function copyLauncherDiagnostics() {
-    const report = launcherDiagnostics.join("\n");
-    try {
-      await navigator.clipboard.writeText(report);
-      launcherDiagnosticsCopied = true;
-    } catch {
-      // Clipboard can be refused; show the text so it can still be selected.
-      launcherActionMessage = report;
-    }
-  }
-
   async function setDefaultLauncher(pkg: string) {
     const name = launchers.find((l) => l.entry.package === pkg)?.entry.name ?? pkg;
     launcherActionBusy = pkg;
     launcherActionMessage = "";
-    launcherDiagnostics = [];
-    launcherDiagnosticsCopied = false;
     launcherProgress = "";
     // The backend works through several strategies (enable → role → set-home-
     // activity → verify) that can take a few seconds; narrate each step so the
@@ -1616,19 +1190,12 @@
           r.strategy === "disable_stock_takeover"
             ? `${name} is now your default launcher — the stock launcher was disabled to hand it over. Re-enable it from this list any time.`
             : `${name} is now your default launcher.`;
-        // A successful switch only carries `last_error` as a follow-up note
-        // (e.g. the setup helper couldn't be re-enabled).
-        if (r.last_error) launcherActionMessage += ` ${r.last_error}`;
       } else {
         // Backend messages are full sentences (including the "device accepted
         // the change — press Home" case) — render them verbatim rather than
         // prefixing "Failed:", which once produced "Failed: Success".
         launcherActionMessage =
           r.last_error ?? "Could not set default launcher. Try disabling other launchers first.";
-        // Only on failure: this is the record a reporter can paste back, and
-        // it is the only thing that distinguishes "the device refused the
-        // command" from "the device accepted it and ignored it".
-        launcherDiagnostics = r.diagnostics ?? [];
       }
       // Always re-read state: the switch can land a beat after the backend's
       // own poll window, and the takeover path flips enabled/disabled badges —
@@ -1704,25 +1271,11 @@
     optimizeResetToken++;
     launchersLoaded = false;
     healthStale = true;
-    refreshMeasurements();
-    endOptimizeRun(true);
-    noteDeviceRun();
-    if (apps.length === 0) {
-      statesUnreadAfterRun = true;
-      return;
-    }
-    const context = capturePageContext();
-    const resync = beginStatesResync();
+    if (apps.length === 0) return;
     try {
-      appStates = await fetchAppStates(context, apps.map((a) => a.package));
-      if (!pageContextIsCurrent(context)) return;
-      catalogInventoryVersion++;
+      appStates = await fetchAppStates(apps.map((a) => a.package));
     } catch {
-      if (!pageContextIsCurrent(context)) return;
-      appStates = {};
       appsLoaded = false; // fall back to the lazy reload next tab visit
-    } finally {
-      endStatesResync(resync);
     }
   }
 
@@ -1733,7 +1286,7 @@
       Object.keys(preview.settings_to_write).length +
       preview.settings_to_delete.length +
       (preview.launcher_to_set ? 1 : 0);
-    if (!confirm(`Restore this snapshot? ${total} change(s) will be made to the device. Disabled packages can be re-enabled later via Recovery.`)) return;
+    if (!confirm(`Apply this snapshot? ${total} change(s) will be made to the device. Disabled packages can be re-enabled later via Recovery.`)) return;
     applyBusy = true;
     applyErr = null;
     applyResult = null;
@@ -1822,6 +1375,52 @@
     }
   }
 
+  async function toggleRecording() {
+    recordingBusy = true;
+    headerActionMsg = "";
+    try {
+      if (!recording) {
+        const r = await api.startRecording(serial);
+        recording = r.ok;
+        recordMsg = r.message;
+        recordPath = null;
+      } else {
+        const r = await api.stopRecording(serial);
+        recording = false;
+        recordMsg = r.message;
+        recordPath = r.path;
+      }
+    } catch (e) {
+      headerActionMsg = `Recording: ${e}`;
+      recording = false;
+    } finally {
+      recordingBusy = false;
+    }
+  }
+
+  async function revealRecording() {
+    if (!recordPath) return;
+    try {
+      await revealItemInDir(recordPath);
+    } catch (e) {
+      headerActionMsg = `Open folder failed: ${e}`;
+    }
+  }
+
+  let mirrorBusy = $state(false);
+  async function mirrorScreen() {
+    mirrorBusy = true;
+    headerActionMsg = "";
+    try {
+      const r = await api.mirrorScreen(serial);
+      headerActionMsg = r.message;
+    } catch (e) {
+      headerActionMsg = `Mirror: ${e}`;
+    } finally {
+      mirrorBusy = false;
+    }
+  }
+
   async function disconnectAndLeave() {
     if (device?.connection === "usb") {
       if (!confirm("This is a USB device — disconnect will only forget it from the ADB server until you replug. Continue?")) return;
@@ -1831,8 +1430,6 @@
     try {
       const r = await api.disconnectDevice(serial);
       if (r.ok) {
-        pageEpoch++;
-        mutationRequest++;
         goto("/");
       } else {
         headerActionMsg = `Disconnect failed: ${r.message}`;
@@ -1854,18 +1451,21 @@
   // tabs (tweaks/files/sideload/…) load their own data in onMount.
   $effect(() => {
     visited[activeTab] = true;
+    // Settings mounts only the sub-tab on screen — each queries the device on
+    // mount, so mounting all four at once would fire four sets of adb calls.
+    if (settingsSubActive) visited[settingsSubActive] = true;
     if (activeTab === "health") {
       if ((report === null || healthStale) && !reportLoading) {
         healthStale = false;
         loadHealth();
       }
-      // Preload the app tab so its own inventory is ready when visited.
+      // Preload catalog so the memory table can show risk tiers.
       if (!appsLoaded && !appsLoading) loadApps();
     }
-    if (activeTab === "launcher" && !launchersLoaded && !launcherLoading) loadLauncher();
+    // Launchers live as a section in the Display tab; snapshots in Overview.
+    if (settingsSubActive === "display" && !launchersLoaded && !launcherLoading) loadLauncher();
     if (activeTab === "apps" && !appsLoaded && !appsLoading) loadApps();
-    // Health reads it too, for the snapshot callout.
-    if ((activeTab === "snapshot" || activeTab === "health") && !snapshotsLoaded) loadSnapshots();
+    if (activeTab === "overview" && !snapshotsLoaded) loadSnapshots();
   });
 
   // A device-state change (enable/disable/uninstall/launcher switch) in one tab
@@ -1875,38 +1475,17 @@
   // on refreshes itself inline. Existing data stays on screen until each reload
   // finishes, so there's no flash of empty state.
   function invalidateDeviceCaches() {
-    if (activeTab !== "launcher") launchersLoaded = false;
+    if (settingsSubActive !== "display") launchersLoaded = false;
     if (activeTab !== "health") healthStale = true;
-    mediaResetToken++;
-    refreshMeasurements();
   }
 
-  /// RAM, storage and last-used figures read before a change on the device
-  /// no longer describe it, so a mutation re-reads them rather than leaving an
-  /// open panel reporting a removed app's footprint as current.
-  function refreshMeasurements() {
-    if (appMeasures.memory.status !== "idle") void loadAppMemory();
-  }
-
-  function shellExecuted() {
-    endOptimizeRun(false);
-    invalidateDeviceCaches();
-    appsRequest++;
-    otherRequest++;
-    enrichmentRequest++;
-    appMemory = {};
-    appUsage = {};
-    appStorage = {};
+  function optimizeRunStarted() {
+    inventoryGeneration++;
+    measuresRequest++;
+    appMutationInFlight = true;
+    appStates = {};
     appMeasures = idleMeasurements();
-    appsLoaded = false;
-    appsLoading = false;
-    othersLoaded = false;
-    othersLoading = false;
-    preview = null;
-    previewPath = null;
-    optimizeResetToken++;
-    visited.tweaks = false;
-    void loadDevice();
+    invalidateDeviceCaches();
   }
 
   /// Wipe all per-device state. Used if the route's serial changes under a
@@ -1914,39 +1493,22 @@
   /// so this is defensive — but it guarantees no device's data or in-flight
   /// timer can leak onto another if a device→device link is ever added).
   function resetDeviceState() {
-    pageEpoch++;
-    deviceRequest++;
-    healthRequest++;
-    resourceRequest++;
-    resource = null;
-    resourceLoading = false;
-    resourceErr = null;
-    // Resolved again by the $effect above once the new device's id lands.
-    shellAckResolvedFor = null;
-    shellAcknowledged = false;
-    appsRequest++;
-    otherRequest++;
-    enrichmentRequest++;
-    mutationRequest++;
     if (liveRefreshTimer) {
       clearInterval(liveRefreshTimer);
       liveRefreshTimer = null;
     }
     liveRefresh = false;
     activeTab = "overview";
+    activeSettingsSub = "display";
     // Unmount the extracted tab components — their state dies with them.
     visited = {};
     device = null; deviceErr = null;
-    report = null; reportErr = null; reportLastRefreshed = null; memorySafety = {};
-    memoryConfirmed = new Set();
+    report = null; reportErr = null; reportLastRefreshed = null; safetyMap = {};
     launchers = []; launchersLoaded = false; currentLauncher = null; channelDisabled = null;
     launcherErr = null; launcherActionMessage = "";
-    stopStorePoll(); storeOpened = null;
-    homePickerPackages = []; homePickerErr = null; homePickerChoice = ""; homePickerActivity = "";
-    homePickerMessage = ""; homePickerOk = false; stockConfirmOpen = false; stockHoldsHomeFor = null;
-    appStatesResync++; appStatesResyncing = false; statesUnreadAfterRun = false; othersStaleAfterRun = false; optimizeRunActive = false;
-    apps = []; appsLoaded = false; appsErr = null; appStates = {}; packageSafety = {}; appActionBusy = null; appActionMessage = "";
-    otherPackages = []; othersLoaded = false; othersErr = null; appMemory = {}; appUsage = {}; appStorage = {}; appMeasures = idleMeasurements(); appSearch = ""; hideNotInstalled = true; showSystemOthers = false;
+    apps = []; appsLoaded = false; appsErr = null; appStates = {}; appActionMessage = "";
+    installedPackages = []; appMemory = {}; appUsage = {}; usageWindowSecs = null; appSearch = ""; hideNotInstalled = true;
+    kindFilter = { curated: true, user: true, system: false }; onlyRecommended = false;
     clonePkg = null; cloneTargets = [];
     snapshots = []; snapshotsLoaded = false; snapshotsErr = null; preview = null; previewPath = null; previewErr = null; saveResult = "";
     headerActionMsg = ""; recoveryResult = null; recoveryErr = null; screenshot = null;
@@ -1963,26 +1525,39 @@
     if (loadedSerial !== null && loadedSerial !== s) {
       resetDeviceState();
       loadDevice();
+      // Overrides are per-device — the new device's marks replace the old.
+      loadSafetyOverrides();
     }
     loadedSerial = s;
   });
 
-  /// A property the device never answered arrives as an empty string. Show an
-  /// em dash rather than a blank cell, so "unreported" reads differently from
-  /// "reported as empty".
-  function shown(value: string | null | undefined): string {
-    const trimmed = value?.trim() ?? "";
-    return trimmed === "" || trimmed === "unknown" ? "—" : trimmed;
-  }
-
-  onMount(loadDevice);
+  onMount(() => {
+    loadDevice();
+    reapplyBootTweaks();
+    loadSafetyOverrides();
+    keepaliveTimer = setInterval(() => {
+      api.pingDevice(serial).catch(() => {});
+    }, KEEPALIVE_INTERVAL_MS);
+  });
 </script>
 
+<svelte:window
+  onclick={() => (appMenuOpen = null)}
+  onkeydown={(e) => {
+    if (e.key === "Escape") appMenuOpen = null;
+  }}
+/>
+
 <div class="back-row">
-  <button class="back-btn" onclick={() => goto("/")}>
-    <Icon name="arrow_back" size={16} /> Back to devices
-  </button>
+  <button onclick={() => goto("/")}>← Back to devices</button>
 </div>
+
+{#if reapplyMessage}
+  <div class="reapply-banner">
+    <span>{reapplyMessage}</span>
+    <button class="small-action" onclick={() => (reapplyMessage = "")}>Dismiss</button>
+  </div>
+{/if}
 
 {#if deviceErr}
   <div class="error">{deviceErr}</div>
@@ -2021,17 +1596,24 @@
             </button>
           </h1>
         {/if}
+        <div class="device-meta">
+          <span>{deviceTypeLabel(device.device_type)}</span>
+          {#if device.model}<span>· {device.model}</span>{/if}
+          <span class="serial">· {device.serial}</span>
+          {#if device.properties?.android_release}
+            <span>· Android {device.properties.android_release}</span>
+          {/if}
+        </div>
       </div>
       <div class="device-header-actions">
         <div class="reboot-wrap">
           <button
-            class="reboot-btn"
             onclick={() => (rebootMenuOpen = !rebootMenuOpen)}
             disabled={rebootBusy}
             aria-haspopup="menu"
             aria-expanded={rebootMenuOpen}
           >
-            {rebootBusy ? "Rebooting…" : "Reboot"}{#if !rebootBusy}<Icon name="expand_more" size={16} />{/if}
+            {rebootBusy ? "Rebooting…" : "Reboot ▾"}
           </button>
           {#if rebootMenuOpen}
             <div class="reboot-menu" role="menu">
@@ -2049,7 +1631,21 @@
           {screenshotBusy ? "Capturing…" : "Screenshot"}
         </button>
         <button
-          class="small-action subtle"
+          class:recording={recording}
+          onclick={toggleRecording}
+          disabled={recordingBusy}
+          title="Record the TV screen (screenrecord) and save the MP4 to this computer. Single clip caps at ~3 min; DRM/protected video records black."
+        >
+          {recordingBusy ? "Working…" : recording ? "■ Stop recording" : "● Record"}
+        </button>
+        <button
+          onclick={mirrorScreen}
+          disabled={mirrorBusy}
+          title="Open a scrcpy mirror window to view & control the TV (requires scrcpy on your PATH)"
+        >
+          {mirrorBusy ? "Opening…" : "Mirror"}
+        </button>
+        <button
           onclick={disconnectAndLeave}
           disabled={disconnectBusy}
           title="Drop the ADB connection to this device. Useful for network devices you don't want auto-reconnecting on Refresh."
@@ -2057,14 +1653,6 @@
           {disconnectBusy ? "Disconnecting…" : "Disconnect"}
         </button>
       </div>
-    </div>
-    <div class="device-meta">
-      <span>{deviceTypeLabel(device.device_type)}</span>
-      {#if device.model}<span>· {device.model}</span>{/if}
-      <span class="serial">· {device.serial}</span>
-      {#if device.properties?.android_release}
-        <span>· Android {device.properties.android_release}</span>
-      {/if}
     </div>
     {#if headerActionMsg}
       <p class="muted small mono action-message">{headerActionMsg}</p>
@@ -2079,31 +1667,32 @@
         </div>
       </div>
     {/if}
+    {#if recordMsg}
+      <div class="screenshot-meta">
+        <span class="muted small mono">{recordMsg}</span>
+        {#if recordPath}
+          <button class="small-action" onclick={revealRecording}>Open folder</button>
+        {/if}
+        <button class="small-action subtle" onclick={() => { recordMsg = ""; recordPath = null; }}>Dismiss</button>
+      </div>
+    {/if}
   </header>
 
   <div class="tabs" role="tablist" aria-label="Device sections">
-    <!-- Health sits second, right after Overview: "how is this TV doing" is
-         the ordinary reason to open a device, not a power-user afterthought.
-         The rest follow the shape of the job — the tabs you act in, in roughly
-         the order a debloat happens, then the ones you only read, then Shell
-         pushed to the far edge, since it is the documented opt-in exception to
-         the safety story and should not sit shoulder to shoulder with the
-         curated actions. That gap carries the grouping on its own; hairline
-         separators between tabs read as rendering artifacts. -->
     {#each [
-      { id: "overview", label: "Overview", far: false },
-      { id: "health", label: "Health", far: false },
-      { id: "optimize", label: "Optimize", far: false },
-      { id: "apps", label: "App List", far: false },
-      { id: "launcher", label: "Launcher", far: false },
-      { id: "tweaks", label: "Tweaks", far: false },
-      { id: "snapshot", label: "Snapshot", far: false },
-      { id: "sideload", label: "Install APK", far: false },
-      { id: "remote", label: "Remote", far: false },
-      { id: "files", label: "Files", far: false },
-      { id: "media", label: "Playback", far: false },
-      { id: "logs", label: "Logs", far: false },
-      { id: "shell", label: "Shell", far: true },
+      { id: "overview", label: "Overview" },
+      { id: "health", label: "Health" },
+      { id: "media", label: "Playback" },
+      { id: "apps", label: "App List" },
+      { id: "optimize", label: "Optimize" },
+      { id: "settings", label: "Settings" },
+      { id: "tweaks", label: "Tweaks" },
+      { id: "remote", label: "Remote" },
+      { id: "files", label: "Files" },
+      { id: "sideload", label: "Install APK" },
+      { id: "console", label: "Console" },
+      { id: "logs", label: "Logs" },
+      { id: "shell", label: "Shell" },
     ] as t (t.id)}
       <button
         role="tab"
@@ -2111,1343 +1700,142 @@
         aria-controls={`tabpanel-${t.id}`}
         id={`tab-${t.id}`}
         class:active={activeTab === t.id}
-        class:far={t.far}
         onclick={() => (activeTab = t.id as Tab)}
       >
-        {t.label}{#if t.id === "snapshot"}<span class="beta-tag">Beta</span>{/if}
+        {t.label}
       </button>
     {/each}
   </div>
 
   {#if activeTab === "overview"}
-    <div class="profile-layout" role="tabpanel" tabindex={0} id="tabpanel-overview" aria-labelledby="tab-overview">
-      <div class="card">
-        <div class="card-header">
-          <h2><Icon name="tv" size={20} /> Profile</h2>
-          <div class="header-actions">
-            <button class="small-action" onclick={copyProfile} disabled={!device.properties}>
-              <Icon name="content_copy" size={14} /> {profileCopied ? "Copied" : "Copy all"}
-            </button>
-          </div>
-        </div>
-        {#if device.properties}
-          <h3>Device properties</h3>
-          <div class="prop-table">
-            <div class="prop-row">
-              <span class="prop-label">Friendly name</span>
-              <span class="prop-value">{shown(device.properties.friendly_name)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Brand</span>
-              <span class="prop-value mono">{shown(device.properties.brand)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Model</span>
-              <span class="prop-value mono">{shown(device.properties.model)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Codename</span>
-              <span class="prop-value mono">{shown(device.properties.device_codename)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Manufacturer</span>
-              <span class="prop-value mono">{shown(device.properties.manufacturer)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Build ID</span>
-              <span class="prop-value mono">{shown(device.properties.build_id)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Board platform</span>
-              <span class="prop-value mono">{shown(device.properties.board_platform)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Hardware ID</span>
-              <span class="prop-value mono">{shown(device.properties.serial_number)}</span>
-            </div>
-            <div class="prop-row">
-              <span class="prop-label">Android version</span>
-              <span class="prop-value mono">
-                {shown(device.properties.android_release)} · SDK {shown(device.properties.sdk_level)}
-              </span>
-            </div>
-          </div>
-          <p class="muted small prop-note">
-            Read-only — sourced from <code>getprop</code>. The friendly name is the
-            only field this app can change, with Rename above.
-          </p>
-        {:else}
-          <p class="muted small">
-            This device hasn't reported its details. It's usually still waiting on
-            the debugging authorization prompt on the TV — over the network some
-            TVs still title that "Allow USB debugging?".
-          </p>
+    <div class="card" role="tabpanel" tabindex={0} id="tabpanel-overview" aria-labelledby="tab-overview">
+      <h2>Profile</h2>
+      {#if device.properties}
+        <dl class="kv">
+          <dt>Friendly name</dt>
+          <dd>{device.properties.friendly_name ?? "—"}</dd>
+          <dt>Brand</dt><dd>{device.properties.brand}</dd>
+          <dt>Model</dt><dd>{device.properties.model}</dd>
+          <dt>Codename</dt><dd>{device.properties.device_codename}</dd>
+          <dt>Manufacturer</dt><dd>{device.properties.manufacturer}</dd>
+          <dt>Android version</dt><dd>{device.properties.android_release} (SDK {device.properties.sdk_level})</dd>
+          <dt>Build ID</dt><dd>{device.properties.build_id}</dd>
+          <dt>Board platform</dt><dd>{device.properties.board_platform}</dd>
+        </dl>
+      {/if}
+
+      <div class="recovery-section">
+        <h3>Emergency Recovery</h3>
+        <p class="muted small">
+          If something broke after disabling a package, re-enable everything that's
+          currently disabled in one shot. Equivalent to v1's <code>Run-PanicRecovery</code>.
+        </p>
+        <button
+          class="danger-button"
+          onclick={runRecovery}
+          disabled={recoveryBusy}
+          title="pm enable every package currently in `pm list packages -d`"
+        >
+          {recoveryBusy ? "Restoring…" : "Re-enable all disabled packages"}
+        </button>
+        {#if recoveryErr}
+          <div class="error">{recoveryErr}</div>
         {/if}
-      </div>
-
-      <aside class="profile-side">
-        <h3 class="side-label">Emergency recovery</h3>
-        <div class="card danger-card">
-          <h2><Icon name="restore" size={20} /> Re-enable everything</h2>
-          <!-- The copy says "everything currently disabled" rather than "what
-               this app disabled", because that is what the command does:
-               panic_recovery runs `pm enable` over `pm list packages -d`. There
-               is no per-app change log, so a package you disabled by hand
-               elsewhere is re-enabled too. -->
-          <p class="muted small">
-            Re-enables every package that is currently disabled on this TV — not
-            only the ones changed here. Use it when the TV boots to a black
-            screen, the launcher is gone, or an app you need has vanished.
-          </p>
-          <button
-            class="danger-button recovery-run"
-            onclick={runRecovery}
-            disabled={recoveryBusy}
-            title="pm enable every package currently in `pm list packages -d`"
-          >
-            {recoveryBusy ? "Restoring…" : "Run Emergency Recovery"}
-          </button>
-          <p class="muted recovery-caption">Asks for confirmation · cannot be undone from here</p>
-          {#if recoveryErr}
-            <div class="error">{recoveryErr}</div>
-          {/if}
-          {#if recoveryResult}
-            <div class="recovery-result">
-              <p><strong>{recoveryResult.message}</strong></p>
-              {#if recoveryResult.failed.length > 0}
-                <details>
-                  <summary>{recoveryResult.failed.length} package(s) failed</summary>
-                  <ul class="mono small">
-                    {#each recoveryResult.failed as f}
-                      <li>{f.package}: {f.error}</li>
-                    {/each}
-                  </ul>
-                </details>
-              {/if}
-            </div>
-          {/if}
-        </div>
-        <div class="callout">
-          <Icon name="info" size={16} />
-          <span>
-            Recovery cannot tell which app disabled a package. Anything disabled
-            outside this app is re-enabled as well.
-          </span>
-        </div>
-      </aside>
-    </div>
-  {:else if activeTab === "health"}
-    <div class="health-stack" role="tabpanel" tabindex={0} id="tabpanel-health" aria-labelledby="tab-health">
-      <div class="health-head">
-        <div class="header-title">
-          <h2><Icon name="monitor_heart" size={20} /> Health</h2>
-          <p class="muted small mono header-sub" data-tip={reportLastRefreshed?.toISOString() ?? undefined}>
-            {refreshLabel} · dumpsys meminfo, df, top
-          </p>
-        </div>
-        <div class="header-actions">
-          <!-- Two controls, not three. Refresh already re-runs the resource
-               sample (loadHealth kicks it off), so the separate "Sample again"
-               beside the CPU figure was a third button for a job Refresh
-               already did. -->
-          <span class="live-pill" class:on={liveRefresh}>
-            <span class="live-dot" aria-hidden="true"></span>
-            {liveRefresh ? "live" : "paused"}
-          </span>
-          <button
-            onclick={toggleLiveRefresh}
-            data-tip={liveRefresh
-              ? "Stop re-reading the report every few seconds"
-              : "Re-read the report every few seconds"}
-          >
-            {liveRefresh ? "Pause" : "Go live"}
-          </button>
-          <button onclick={loadHealth} disabled={reportLoading}>
-            {reportLoading ? "Loading…" : "Refresh"}
-          </button>
-        </div>
-      </div>
-      <div class="health-vitals">
-        {#if reportErr}
-          <div class="error">{reportErr}</div>
-        {:else if !report}
-          <div class="muted">{reportLoading ? "Querying…" : "—"}</div>
-        {:else}
-        <!-- Board 11.2's five cards: a title, the figure, the bar, and the
-             one sub-line that says what the figure is measured against. The
-             old tiles were a glyph and a naked number, so "64%" did not say
-             64% of what. -->
-        <div class="stat-tiles">
-          <div class="stat-card">
-            <div class="stat-head">
-              <span class="stat-title">RAM</span>
-              {#if report.ram.total_mb != null}
-                <span class="stat-figure mono">{report.ram.used_mb ?? "?"} / {report.ram.total_mb} MB</span>
-              {/if}
-            </div>
-            {#if ramPct != null}
-              <div class="meter" role="presentation">
-                <div class="meter-fill {meterTone(ramPct)}" style="width: {Math.min(100, ramPct)}%"></div>
-              </div>
-            {/if}
-            <div class="stat-foot mono">
-              <span>{ramFreeMb != null ? `${ramFreeMb} MB free` : "—"}</span>
-              {#if ramPct != null}<span>{100 - ramPct}% free</span>{/if}
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-head">
-              <span class="stat-title">Storage</span>
-              {#if report.storage.total}
-                <span class="stat-figure mono">{report.storage.used ?? "?"} / {report.storage.total}</span>
-              {/if}
-            </div>
-            {#if report.storage.used_percent != null}
-              <div class="meter" role="presentation">
-                <div
-                  class="meter-fill {meterTone(report.storage.used_percent)}"
-                  style="width: {Math.min(100, report.storage.used_percent)}%"
-                ></div>
-              </div>
-            {/if}
-            <div class="stat-foot mono">
-              <span>/data</span>
-              <!-- A device mutation that moves exactly this number, so it sits
-                   with it rather than in the header among the view controls. -->
-              <button
-                class="small-action subtle"
-                onclick={clearCaches}
-                disabled={trimBusy}
-                data-tip="Clears every app's cache; they rebuild on next launch"
-                data-tip-align="end"
-              >{trimBusy ? "Clearing…" : "Clear caches"}</button>
-            </div>
-          </div>
-
-          <!-- Swap reads like CPU and Temperature because it is the same kind
-               of figure: one number with a unit, not a used/total pair. It was
-               rendered as a `.stat-figure` caption in the card's head, which
-               put the most alarming number on the screen in the smallest type
-               on the screen. -->
-          <div class="stat-card">
-            <div class="stat-head">
-              <span class="stat-title">Swap</span>
-            </div>
-            <div class="stat-big mono" class:warn={swapTone === "warn"} class:danger={swapTone === "danger"}>
-              {#if report.ram.swap_mb != null}
-                {report.ram.swap_mb}<span class="stat-unit">MB</span>
-              {:else}<span class="stat-pending">—</span>{/if}
-            </div>
-            <div class="stat-foot mono">
-              {#if report.ram.swap_mb != null}
-                <span
-                  class="tip-wrap"
-                  data-tip="RAM ran out and the TV is paging to storage. A little is normal; hundreds of MB means something is hogging memory"
-                >in use</span>
-              {:else}
-                <span>not reported</span>
-              {/if}
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-head">
-              <span class="stat-title">CPU</span>
-            </div>
-            <div class="stat-big mono">
-              {#if resource?.cpu_percent != null}
-                {resource.cpu_percent.toFixed(0)}<span class="stat-unit">%</span>
-              {:else}<span class="stat-pending">{resourceLoading ? "…" : "—"}</span>{/if}
-            </div>
-            <!-- A bar, like RAM and Storage. A percentage with no track beside
-                 it was the one figure on the row you had to know the scale of. -->
-            {#if resource?.cpu_percent != null}
-              <div class="meter" role="presentation">
-                <div
-                  class="meter-fill {meterTone(resource.cpu_percent)}"
-                  style="width: {Math.min(100, resource.cpu_percent)}%"
-                ></div>
-              </div>
-            {/if}
-            <div class="stat-foot mono">
-              <span>
-                {#if resource?.interval_ms != null}
-                  sampled over {(resource.interval_ms / 1000).toFixed(2)}s
-                {:else}
-                  from top
-                {/if}
-              </span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-head">
-              <span class="stat-title">Temperature</span>
-            </div>
-            <div class="stat-big mono" class:warn={tempTone === "warn"} class:danger={tempTone === "danger"}>
-              {#if report.temperature_c != null}
-                {report.temperature_c.toFixed(0)}<span class="stat-unit">°C</span>
-              {:else}<span class="stat-pending">—</span>{/if}
-            </div>
-            <!-- The board prints "throttles at 85 °C". We do not read the
-                 throttle point from the device, so the tiers are bands for a
-                 reader and the tooltip says the limit is not ours to quote. -->
-            <div class="stat-foot mono">
-              {#if tempWord}
-                <span
-                  class="tip-wrap"
-                  data-tip="Throttling usually starts around 80–85 °C; the device does not report its own limit"
-                  data-tip-align="end"
-                >thermal zone · {tempWord}</span>
-              {:else}
-                <span>thermal zone</span>
-              {/if}
-            </div>
-          </div>
-        </div>
-        {/if}
-      </div>
-
-      {#if report && !reportErr}
-      <div class="health-grid">
-        <div class="health-col">
-          <div class="card">
-            <h2><Icon name="speed" size={20} /> Network · per interface</h2>
-            {#if resourceErr}<p class="error">Resource sample: {resourceErr}</p>{/if}
-            {#if trimMessage}<p class="muted small mono trim-note">{trimMessage}</p>{/if}
-            <!-- Every interface as its own row, as the board has it. The old
-                 <dl> packed them into a three-column grid inside one cell,
-                 which put six interfaces into a block you had to decode. -->
-            {#if resource?.interfaces.length}
-              <table class="net-table">
-                <thead>
-                  <tr><th>Interface</th><th class="right">RX</th><th class="right">TX</th></tr>
-                </thead>
-                <tbody>
-                  {#each resource.interfaces as network (network.name)}
-                    <tr>
-                      <td class="mono">{network.name}</td>
-                      <td class="right mono">{formatRate(network.rx_bytes_per_s)}</td>
-                      <td class="right mono">{formatRate(network.tx_bytes_per_s)}</td>
-                    </tr>
+        {#if recoveryResult}
+          <div class="recovery-result">
+            <p><strong>{recoveryResult.message}</strong></p>
+            {#if recoveryResult.failed.length > 0}
+              <details>
+                <summary>{recoveryResult.failed.length} package(s) failed</summary>
+                <ul class="mono small">
+                  {#each recoveryResult.failed as f}
+                    <li>{f.package}: {f.error}</li>
                   {/each}
-                </tbody>
-              </table>
-            {:else}
-              <p class="muted">{resourceLoading ? "Sampling…" : "The device reported no interfaces."}</p>
+                </ul>
+              </details>
             {/if}
           </div>
-
-          <div class="card">
-            <h2><Icon name="tv" size={20} /> Display &amp; Audio</h2>
-            <!-- One card, two blocks. The board draws two cards, but the audio
-                 side is a single string and a whole card for one value reads
-                 as empty. The chips are facts, not verdicts, so they take no
-                 status colour. -->
-            <div class="av-grid">
-              <div class="av-block">
-                <h3>Display</h3>
-                <div class="av-primary">{report.display.resolution ?? "—"}</div>
-                <div class="av-chips">
-                  {#if report.display.refresh_hz}
-                    <span class="av-chip">{report.display.refresh_hz} Hz</span>
-                  {/if}
-                  {#if report.display.hdr_types.length}
-                    {#each report.display.hdr_types as hdr (hdr)}
-                      <span class="av-chip">{hdr}</span>
-                    {/each}
-                  {:else}
-                    <span class="av-chip muted">SDR only</span>
-                  {/if}
-                </div>
-              </div>
-              <span class="av-rule" aria-hidden="true"></span>
-              <div class="av-block">
-                <h3>Audio out</h3>
-                <!-- Printed whole. We cannot reliably split "Dolby Atmos" from
-                     "over HDMI (eARC)", and guessing would be inventing data. -->
-                <div class="av-primary av-audio">{report.audio_device ?? "—"}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card health-memory">
-          <h2><Icon name="memory" size={20} /> Top memory users</h2>
-        <p class="muted small consumers-note">
-          The suggestion for an app is the same one the App List gives it —
-          click a row to open it there. Names we cannot tie to an installed
-          package are processes, not apps, and there is nothing to remove.
-        </p>
-        {#if report.top_memory.length === 0}
-          <p class="muted">No process data.</p>
-        {:else}
-          <table class="mem-table">
-            <thead>
-              <tr><th>Memory</th><th>Process</th><th class="center">Suggestion</th></tr>
-            </thead>
-            <tbody>
-              {#each report.top_memory as m}
-                {@const suggestion = memorySuggestion(m)}
-                {@const appPkg = suggestion.kind === "process" ? null : m.package}
-                {@const lookup = suggestion.kind === "recommendation" ? (appPkg ? packageSafety[appPkg] : undefined) : suggestion.status}
-                <!-- The package name is the keyboard target; the row click is a
-                     larger mouse target for the same thing. -->
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                <tr
-                  class:mem-row-link={appPkg !== null}
-                  data-process={m.process}
-                  data-package={appPkg ?? ""}
-                  onclick={appPkg ? () => openInAppList(appPkg) : undefined}
-                >
-                  <td
-                    class="num"
-                    class:warn={m.mb >= 200}
-                    class:caution={m.mb >= 100 && m.mb < 200}
-                  >
-                    {m.mb.toFixed(1)} MB
-                  </td>
-                  <td class="pkg">
-                    {#if appPkg}
-                      <button
-                        class="mem-open"
-                        onclick={(e) => { e.stopPropagation(); openInAppList(appPkg); }}
-                        data-tip={appPkg === m.process ? "Open in the App List" : `Open ${appPkg} in the App List`}
-                      >{m.process}</button>
-                    {:else}
-                      {m.process}
-                      <span
-                        class="unconfirmed"
-                        title="No installed package has this name, so this is a process we cannot tie to an app. The reviewed app list is not applied to unverified names."
-                      >not a package</span>
-                    {/if}
-                    {#if m.pid !== null}
-                      <span class="mem-pid">pid {m.pid}</span>
-                    {/if}
-                  </td>
-                  <td
-                    class="center suggestion-cell"
-                    data-suggestion={suggestion.kind}
-                    data-verdict={lookup?.status === "ready" ? lookup.verdict.kind : (lookup?.status ?? "unavailable")}
-                    title={safetyReason(lookup)}
-                  >
-                    {#if suggestion.kind === "recommendation"}
-                      {@const kept = appPkg !== null && keptPackages.has(appPkg) && suggestion.rec.kind !== "restore"}
-                      <span class={`suggestion suggestion--${kept ? "keep" : suggestion.rec.kind}`}>{kept ? "Kept" : suggestion.rec.label}</span>
-                    {:else if suggestion.kind === "process"}
-                      <span class="suggestion suggestion--keep">Not an app</span>
-                    {:else}
-                      <span class={safetyClass(lookup)}>{safetyLabel(lookup)}</span>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-          {#if appActionMessage}
-            <p class="muted small mono">
-              {appActionMessage}
-              <button class="dismiss" onclick={() => (appActionMessage = "")} title="Dismiss" aria-label="Dismiss"><Icon name="close" size={16} /></button>
-            </p>
-          {/if}
         {/if}
-        </div>
       </div>
-
-      <!-- The one piece of genuine state this screen can lead with, in place
-           of the board's invented score: whether the work is reversible. -->
-      {#if snapshots.length > 0}
-        {@const newest = snapshots[0]}
-        <div class="callout callout-ok">
-          <Icon name="check_circle" size={16} />
-          <span>
-            Snapshot saved {snapTimestamp(newest.saved_at)}. Restoring it re-disables its apps and puts back its Home app and settings; it can't re-enable or reinstall anything.
-          </span>
-          <button class="callout-link" onclick={() => (activeTab = "snapshot")}>
-            Open snapshots
-          </button>
-        </div>
-      {:else}
-        <div class="callout callout-warn">
-          <Icon name="warning" size={16} />
-          <span>No snapshot saved yet — save one before you change anything.</span>
-          <button class="callout-link" onclick={() => (activeTab = "snapshot")}>
-            Save a snapshot
-          </button>
-        </div>
-      {/if}
-      {/if}
     </div>
-  {:else if activeTab === "launcher"}
-    <div class="card" role="tabpanel" tabindex={0} id="tabpanel-launcher" aria-labelledby="tab-launcher">
-      <div class="card-header">
-        <div class="header-title">
-          <h2><Icon name="home" size={20} /> Launcher</h2>
-          <p class="muted small header-sub launcher-sub">
-            <span class="mono">home app resolution · {launchers.length} known launcher{launchers.length === 1 ? "" : "s"}</span>
-            <button class="link-button" onclick={() => openInBrowser(launcherRequestUrl())}>
-              Want another launcher listed? Open an issue
-            </button>
-          </p>
-        </div>
-        <button onclick={loadLauncher} disabled={launcherLoading}>
-          {launcherLoading ? "Loading…" : "Refresh"}
-        </button>
-      </div>
-      {#if launcherErr}
-        <div class="error">{launcherErr}</div>
-      {:else}
-        {#if channelDisabled}
-          <div class="warning">
-            <Icon name="warning" size={16} /> <code>com.android.providers.tv</code> is disabled on this device. Watch Next / Continue
-            Watching rows from Apple TV, Netflix, Disney+ etc. will be empty until you re-enable it.
-          </div>
-        {/if}
-        {#if launchers.length === 0 && !launcherLoading}
-          <p class="muted">No launchers loaded.</p>
-        {:else}
-          <div class="launcher-head">
-            <span>Launcher</span><span>State</span><span class="right">Action</span>
-          </div>
-          <ul class="launcher-list">
-            {#each launchers as l}
-              {@const isCurrent = currentLauncher?.package === l.entry.package}
-              {@const busy = launcherActionBusy === l.entry.package}
-              <li class:is-current={isCurrent}>
-                <div class="launcher-ident">
-                  <span class="launcher-icon" aria-hidden="true"><Icon name="home" size={18} /></span>
-                  <div class="launcher-text">
-                    <div class="launcher-name">{l.entry.name}</div>
-                    <div class="muted small mono launcher-pkg">{l.entry.package}</div>
-                    {#if busy && launcherProgress}
-                      <div class="launcher-progress" role="status" aria-live="polite">
-                        <span class="spinner" aria-hidden="true"></span>{launcherProgress}…
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-                <div class="tags">
-                  {#if l.stock}
-                    <span class="tag stock">STOCK</span>
-                  {:else if l.setup_helper}
-                    <span class="tag stock">SETUP</span>
-                  {:else if l.other}
-                    <span class="tag stock">HOME APP</span>
-                  {/if}
-                  {#if isCurrent}
-                    <span class="tag installed">ACTIVE</span>
-                  {/if}
-                  {#if l.installed}
-                    {#if !l.stock && !l.other}<span class="tag installed">INSTALLED</span>{/if}
-                    {#if !l.enabled}<span class="tag disabled">DISABLED</span>{/if}
-                  {:else}
-                    <span class="tag missing">MISSING</span>
-                  {/if}
-                </div>
-                <div class="row-actions">
-                  {#if !l.installed}
-                    <button
-                      class="small-action"
-                      onclick={() => installLauncherFromStore(l.entry.package)}
-                      disabled={launcherActionBusy !== null}
-                      title="Opens {l.entry.name}'s Play Store page on the TV; you confirm the install there"
-                    >
-                      {busy ? "Opening…" : "Open Play Store on TV"}
-                    </button>
-                  {:else}
-                    {#if !l.enabled}
-                      <button
-                        class="small-action"
-                        onclick={() => enableLauncher(l.entry.package)}
-                        disabled={launcherActionBusy !== null}
-                        title="pm enable {l.entry.package}"
-                      >
-                        {busy ? "Enabling…" : "Enable"}
-                      </button>
-                    {/if}
-                    {#if !isCurrent && !l.setup_helper}
-                      <button
-                        class="small-action"
-                        onclick={() => setDefaultLauncher(l.entry.package)}
-                        disabled={launcherActionBusy !== null}
-                        title={l.enabled
-                          ? "Make this the default launcher (role API / set-home-activity)"
-                          : "Enable this launcher, then make it the default"}
-                      >
-                        {busy ? "Setting…" : l.enabled ? "Set as default" : "Enable & set default"}
-                      </button>
-                    {/if}
-                    {#if !isCurrent && l.enabled}
-                      <button
-                        class="small-action subtle"
-                        class:danger={l.stock || l.setup_helper}
-                        onclick={() => disableLauncher(l.entry.package)}
-                        disabled={launcherActionBusy !== null}
-                        title={l.stock
-                          ? `pm disable-user --user 0 ${l.entry.package} — this is the TV's stock home app`
-                          : `pm disable-user --user 0 ${l.entry.package}`}
-                      >{busy ? "Disabling…" : "Disable"}</button>
-                    {:else if isCurrent}
-                      <!-- The reason it cannot be disabled is the callout under
-                           this table, so the row states the fact and the page
-                           states the why — once, rather than on every row. -->
-                      <span
-                        class="current-default"
-                        title="Disabling the launcher you're currently using would leave the TV with no Home screen. Set another launcher as default first."
-                      >Current default</span>
-                    {/if}
-                  {/if}
-                  {#if l.entry.source_url}
-                    <button
-                      class="small-action subtle launcher-get"
-                      onclick={() => openInBrowser(l.entry.source_url ?? "")}
-                      data-tip="Opens the developer's page in your browser. Nothing is downloaded, uninstalled, or changed on the TV."
-                      data-tip-align="end"
-                      aria-label="Open the developer's page for {l.entry.name} in your browser"
-                    ><Icon name="open_in_new" size={14} /> <span>Source site</span></button>
-                  {/if}
-                </div>
-              </li>
-            {/each}
-          </ul>
-          {#if setupHelper && setupHelperState}
-            <div
-              class="callout setup-helper-callout"
-              class:callout-warn={setupHelperState === "risk"}
-              role="status"
-              data-setup-helper={setupHelperState}
-            >
-              <Icon name={setupHelperState === "risk" ? "warning" : "info"} size={16} />
-              <span>
-                {#if setupHelperState === "off"}
-                  Setup Wraith is off. Turn this back on if Google asks you to sign in again or you
-                  need to pair a remote; turn it off again after.
-                {:else if setupHelperState === "on"}
-                  Google TV's setup helper (Setup Wraith) is on. It can take the Home button back
-                  after you switch launchers. Disable stock launcher turns it off too.
-                {:else}
-                  Google TV's setup helper (Setup Wraith) is on while the stock launcher is off. It
-                  will likely grab the Home button.
-                {/if}
-              </span>
-              {#if setupHelperState === "off"}
-                <button
-                  class="small-action"
-                  onclick={() => enableLauncher(setupHelper.entry.package)}
-                  disabled={launcherActionBusy !== null}
-                  title="pm enable {setupHelper.entry.package}"
-                >Re-enable Setup Wraith</button>
-              {:else if setupHelperState === "risk"}
-                <button
-                  class="small-action"
-                  onclick={turnOffSetupHelper}
-                  disabled={launcherActionBusy !== null}
-                  title="Turns it off only if a real launcher is still enabled, then checks Home still lands there"
-                >Turn it off</button>
-              {/if}
-            </div>
-          {/if}
-          <!-- The board also promises an automatic snapshot here. This app does
-               not take one, so the callout says what is true and points at the
-               tab that does it. -->
-          <div class="callout callout-warn launcher-callout">
-            <Icon name="warning" size={16} />
-            <span>
-              Disabling the current home app without setting a replacement first leaves the
-              TV with no home screen. Save a snapshot before you change this.
-            </span>
-            <button class="callout-link" onclick={() => (activeTab = "snapshot")}>
-              Open snapshots
-            </button>
-          </div>
-          <div class="launcher-foot">
-            <div class="foot-card" data-tip="What the TV launches when you press Home" title={currentLauncher?.note ?? undefined}>
-              <span class="foot-label">Current home app</span>
-              <!-- The device reports a `package/activity` component and the
-                   command splits it; showing the activity alone (".MainActivity")
-                   named nothing. Put it back together. -->
-              <span class="mono foot-value">
-                {currentLauncher?.package
-                  ? currentLauncher.activity
-                    ? `${currentLauncher.package}/${currentLauncher.activity}`
-                    : currentLauncher.package
-                  : "—"}
-              </span>
-            </div>
-          </div>
-          {#if storeOpened}
-            <div class="callout callout-ok launcher-store-callout" role="status">
-              <Icon name="check_circle" size={16} />
-              <span>
-                Opened the Play Store on the TV. Confirm the install there.
-                <span class="muted">Checking for {storeOpened.name} every few seconds.</span>
-              </span>
-              <button class="callout-link" onclick={() => { stopStorePoll(); storeOpened = null; }}>
-                Dismiss
-              </button>
-            </div>
-          {/if}
-          {@const pickedStock = launchers.some((l) => l.stock && l.entry.package === homePickerChoice)}
-          {@const enabledStock = launchers.some((l) => l.stock && l.enabled)}
-          {@const pickedIsHome = homePickerChoice !== "" && currentLauncher?.package === homePickerChoice}
-          {@const stockBlocks = homePickerChoice !== "" && stockHoldsHomeFor === homePickerChoice}
-          {@const canDisableStock =
-            homePickerChoice !== "" && !pickedStock && enabledStock && (pickedIsHome || stockBlocks)}
-          <details
-            class="home-picker"
-            ontoggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) void loadHomePicker(); }}
-          >
-            <summary>Advanced: set another app as Home…</summary>
-            <div class="home-picker-body">
-              <p class="muted small">
-                Any installed app can be tried. Android only accepts an app that declares a
-                Home screen, and this says so when it doesn't. Setting an app never disables
-                anything; taking over from the stock launcher is the separate step below.
-              </p>
-              {#if homePickerErr}
-                <div class="error">{homePickerErr}</div>
-              {/if}
-              <div class="home-picker-row">
-                <label class="home-picker-field">
-                  <span class="foot-label">App</span>
-                  <select
-                    bind:value={homePickerChoice}
-                    disabled={homePickerLoading || homePickerBusy !== null}
-                    aria-label="App to set as Home"
-                    onchange={() => { homePickerMessage = ""; stockConfirmOpen = false; }}
-                  >
-                    <option value="">{homePickerLoading ? "Loading apps…" : "Choose an installed app"}</option>
-                    {#each homePickerPackages as p (p.package)}
-                      <option value={p.package}>{p.name ? `${p.name} — ${p.package}` : p.package}</option>
-                    {/each}
-                  </select>
-                </label>
-                <label class="home-picker-field home-picker-activity">
-                  <span class="foot-label">Activity (optional)</span>
-                  <input
-                    class="mono"
-                    placeholder=".MainActivity"
-                    bind:value={homePickerActivity}
-                    disabled={homePickerBusy !== null}
-                    aria-label="Activity to register as Home (optional)"
-                  />
-                </label>
-                <button
-                  class="small-action"
-                  onclick={setHomeFromPicker}
-                  disabled={homePickerChoice === "" || homePickerBusy !== null || launcherActionBusy !== null}
-                >{homePickerBusy === "set" ? "Setting…" : "Set as Home"}</button>
-                <button
-                  class="small-action subtle danger"
-                  onclick={() => (stockConfirmOpen = true)}
-                  disabled={!canDisableStock || homePickerBusy !== null || launcherActionBusy !== null}
-                  title={canDisableStock
-                    ? "Disable the stock launcher so Home goes to the app you picked"
-                    : !enabledStock
-                      ? "No enabled stock launcher on this TV"
-                      : pickedStock
-                        ? "Pick the app that should take over, not the stock launcher"
-                        : "Set the app as Home first. This stays off until it's Home, or until Android says the stock launcher is what's in the way."}
-                >{homePickerBusy === "stock" ? "Disabling…" : "Disable stock launcher"}</button>
-              </div>
-              {#if stockConfirmOpen}
-                <div class="callout callout-warn home-picker-confirm" role="alertdialog" aria-label="Confirm disabling the stock launcher">
-                  <Icon name="warning" size={16} />
-                  <span>
-                    Disable the stock launcher and hand Home to <span class="mono">{homePickerChoice}</span>?
-                    If Home doesn't land on it, the stock launcher is re-enabled straight away. You can
-                    re-enable it from the list above at any time.
-                    {#if takeoverTurnsOffSetupHelper}
-                      Also turns off Google TV's setup helper (Setup Wraith), or it takes the Home
-                      button back. You may need to turn it back on briefly to sign in to Google again
-                      or pair a remote.
-                    {/if}
-                  </span>
-                  <span class="home-picker-confirm-actions">
-                    <button class="small-action" onclick={() => disableStockFromPicker(true)}>Save snapshot first</button>
-                    <button class="small-action subtle danger" onclick={() => disableStockFromPicker(false)}>Disable stock launcher</button>
-                    <button class="small-action subtle" onclick={() => (stockConfirmOpen = false)}>Cancel</button>
-                  </span>
-                </div>
-              {/if}
-              {#if homePickerMessage}
-                <p class="small action-message home-picker-result" class:ok={homePickerOk} role="status">
-                  {homePickerMessage}
-                </p>
-              {/if}
-            </div>
-          </details>
-          {#if launcherActionMessage}
-            <p class="muted small mono action-message">{launcherActionMessage}</p>
-          {/if}
-          {#if launcherDiagnostics.length > 0}
-            <p class="muted small action-message">
-              <button class="link-button" onclick={copyLauncherDiagnostics}>
-                {launcherDiagnosticsCopied ? "Copied" : "Copy diagnostic details"}
-              </button>
-              — every command this attempt ran and what your TV replied. Paste it into a
-              GitHub issue; it is what makes a launcher report fixable.
-            </p>
-          {/if}
-        {/if}
-      {/if}
-    </div>
-  {:else if activeTab === "apps"}
-    <div class="card" role="tabpanel" tabindex={0} id="tabpanel-apps" aria-labelledby="tab-apps">
-      <div class="card-header">
-        <h2><Icon name="apps" size={20} /> App List for {deviceTypeLabel(device.device_type)}</h2>
-        <div class="header-actions">
-          <span class="muted">{apps.length} curated · {otherPackages.length} other</span>
-          <button onclick={loadApps} disabled={appsLoading}>
-            {appsLoading ? "Loading…" : "Refresh"}
-          </button>
-        </div>
-      </div>
-      <div class="app-toolbar">
-        <input
-          class="app-search"
-          placeholder="Search apps by name or package…"
-          bind:value={appSearch}
-        />
-        <label class="inline-check">
-          <input type="checkbox" bind:checked={hideNotInstalled} />
-          Hide not installed
-        </label>
-        <label class="inline-check">
-          <input type="checkbox" bind:checked={hideDecided} />
-          Hide decided
-        </label>
-        <label class="inline-check">
-          <input type="checkbox" bind:checked={showSystemOthers} />
-          Show system packages
-        </label>
-      </div>
-      {#if appsErr}
-        <div class="error">{appsErr}</div>
-      {/if}
-      {#if appsLoading && apps.length === 0}
-        <div class="muted">Loading…</div>
-      {:else}
-        {#if appActionMessage}
-          <p class="muted small mono action-message">
-            {appActionMessage}
-            <button class="dismiss" onclick={() => (appActionMessage = "")} data-tip="Dismiss" data-tip-align="end" aria-label="Dismiss"><Icon name="close" size={16} /></button>
-          </p>
-        {/if}
-        {#if appMutationInFlight && !appActionBusy}
-          <p class="muted small mono action-message">Finishing the previous app action…</p>
-        {/if}
-        {#if clonePkg}
-          <div class="clone-panel">
-            <span>Copy <code>{clonePkg}</code> to:</span>
-            {#each cloneTargets as t (t.serial)}
-              <button class="small-action" onclick={() => cloneTo(t)} disabled={cloneBusy}>
-                {cloneBusy ? "Copying…" : `${t.name} (${t.serial})`}
-              </button>
-            {/each}
-            <button class="small-action subtle" onclick={() => (clonePkg = null)} disabled={cloneBusy}>
-              Cancel
-            </button>
-          </div>
-        {/if}
-        <table class="app-table">
-          <thead>
-            <tr>
-              <th><span class="sr-only">Details</span></th>
-              <th>App</th>
-              <!-- A whole paragraph, so it stays a `title`: `data-tip` paints
-                   one nowrap line and a paragraph in one line is a page-wide
-                   strip. The short version rides alongside it. -->
-              <th
-                title="Our verdict on removing it, and which list it came from — click a row's verdict for the full reason. Anything we can't vouch for needs an explicit tick before it can be removed."
-                data-tip="Click a row to read the full reason"
-              >Verdict &amp; source</th>
-              <th class="right" data-tip="Resident RAM right now (dumpsys meminfo)">RAM</th>
-              <th
-                class="right"
-                title="Last foreground use, from Android's usagestats. History is limited — roughly a year of rolling buckets — and is cleared by a factory reset, so a dash can mean the record aged out rather than that the app was never opened."
-                data-tip="Android keeps about a year of usage history"
-                data-tip-align="end"
-              >Last used</th>
-              <th class="controls-start">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each visibleApps as a (a.package)}
-              {@const state = appStates[a.package] ?? null}
-              {@const safety = packageSafety[a.package]}
-              {@const rec = recommendation(a, state, safety)}
-              {@const kept = keptPackages.has(a.package) && rec.kind !== "restore"}
-              {@const canRemove = (state === "enabled" || state === "disabled") && safety?.status === "ready" && !isBlocked(safety.verdict)}
-              <AppRow
-                name={a.name}
-                description={a.optimize_description}
-                package={a.package}
-                review={a.review}
-                reviewedAt={a.reviewed_at}
-                {state}
-                mb={appMemory[a.package]}
-                usage={appUsage[a.package]}
-                showUsage={state !== "missing"}
-                safety={safety?.status === "ready" ? safety.verdict : null}
-                safetyStatus={safety?.status ?? "unavailable"}
-                safetyUnavailableReason={safety?.status === "unavailable" ? safety.reason : undefined}
-                rowClass={rec.kind === "review" && !kept ? "review-flag" : undefined}
-                detailOpen={expandedSafety === a.package}
-                onToggleDetail={() =>
-                  (expandedSafety = expandedSafety === a.package ? null : a.package)}
-                details={appDetails(a.package)}
-              >
-                {#snippet actions()}
-                <td class="rec-cell controls-start">
-                  <div class="actions-cell">
-                    <div class="row-verbs">
-                  {#if kept}
-                    <!-- The user's own decision, shown exactly like "already
-                         disabled": grey, because a decided row should recede.
-                         Never teal or lime — those mean verdict and action. -->
-                    <span class="muted small done" data-rec="Kept"><Icon name="check" size={14} /> Kept</span>
-                    <button
-                      class="small-action subtle change-keep"
-                      onclick={() => toggleKept(a.package)}
-                      data-tip="Undo keeping this app"
-                    >Change</button>
-                  {:else if rec.kind === "act"}
-                    <button
-                      class="small-action recommended"
-                      class:danger={rec.action === "uninstall"}
-                      onclick={() => applyRecommendation(a.package, rec.action)}
-                      disabled={appActionBusy === a.package || appMutationInFlight}
-                      title={a.optimize_description}
-                      data-rec={rec.label}
-                    >
-                      {appActionBusy === a.package ? "…" : rec.label}
-                    </button>
-                  {:else if rec.kind === "review"}
-                    <button
-                      class="small-action review-action"
-                      class:danger={rec.action === "uninstall"}
-                      onclick={() => applyRecommendation(a.package, rec.action)}
-                      disabled={appActionBusy === a.package || appMutationInFlight}
-                      data-tip="Check the last-used cue, then act if you don't use it"
-                      data-rec={rec.label}
-                    >
-                      {appActionBusy === a.package ? "…" : rec.label}
-                    </button>
-                  {:else if rec.kind === "restore"}
-                    <button
-                      class="small-action recommended"
-                      onclick={() => reinstallApp(a.package)}
-                      disabled={appActionBusy === a.package || appMutationInFlight}
-                      data-tip="Reinstalls a system app still present on /system"
-                      data-rec={rec.label}
-                    >
-                      {appActionBusy === a.package ? "…" : rec.label}
-                    </button>
-                  {:else if rec.kind === "done"}
-                    <span class="muted small done" data-rec={rec.label}><Icon name="check" size={14} /> {rec.label}</span>
-                  {:else if rec.kind === "unavailable"}
-                    <span class="muted small" data-rec={rec.label}>{rec.label} — refresh to retry</span>
-                  {:else}
-                    <!-- No recommendation. This used to read "Keep", which now
-                         collides with the Keep button one column over: the same
-                         word meant both "we suggest keeping it" and "I have
-                         decided to keep it". -->
-                    <span class="muted small" data-rec={rec.label}>{rec.label}</span>
-                  {/if}
 
-                  {#if !keptPackages.has(a.package) && state === "enabled" && (rec.kind === "act" || rec.kind === "review")}
-                    <button
-                      class="small-action subtle"
-                      onclick={() => toggleKept(a.package)}
-                      data-tip="Mark as one you use — stops being recommended"
-                    >Keep</button>
-                  {/if}
-                  {#if state === "enabled" && canRemove && rec.kind !== "act" && !(rec.kind === "review" && rec.action === "disable")}
-                    <button
-                      class="small-action subtle"
-                      onclick={() => disableApp(a.package)}
-                      disabled={appActionBusy === a.package || appMutationInFlight}
-                      data-tip="pm disable-user --user 0"
-                    >Disable</button>
-                  {/if}
-                  <!-- A sideload whose source we can name. The store can't give
-                       it back, so the confirm names where it comes from and
-                       offers an APK backup first. A preinstalled app with no
-                       store listing never gets this button. -->
-                  {#if canRemove && !isReinstallable(a) && canOfferUninstall(a) && !((rec.kind === "act" || rec.kind === "review") && rec.action === "uninstall")}
-                    <button
-                      class="small-action subtle danger"
-                      onclick={() => uninstallApp(a.package)}
-                      disabled={appActionBusy === a.package || appMutationInFlight}
-                      data-tip={`Not on the Play Store — reinstall from ${sideloadSource(a.package)?.name ?? "its source"}`}
-                    >Uninstall</button>
-                  {/if}
-                  {#if state === "disabled"}
-                    <button
-                      class="small-action subtle"
-                      onclick={() => enableApp(a.package)}
-                      disabled={appActionBusy === a.package || appMutationInFlight}
-                      data-tip="pm enable"
-                    >Enable</button>
-                  {/if}
-                    </div>
-                  <!-- One Actions column, split by a hairline: the decision on
-                       the left, the always-available tools on the right as
-                       icons. Spelling the three tools out in words cost more
-                       width than the package ids did, which is what pushed the
-                       App column into truncating them. The legend under the
-                       table names them.
-
-                       The tools sit in a fixed three-slot grid, and a tool a
-                       row does not have leaves its slot empty rather than
-                       shifting the others — so every icon is in the same place
-                       on every row and you can travel down the column. -->
-                  <span class="tool-sep" aria-hidden="true"></span>
-                  <div class="row-tools">
-                  {#if state === "missing"}
-                    <span class="tool-slot-empty" aria-hidden="true"></span>
-                    <span class="tool-slot-empty" aria-hidden="true"></span>
-                  {/if}
-                  {#if state !== "missing"}
-                    <button
-                      class="tool-btn"
-                      onclick={() => backupApkFor(a.package)}
-                      disabled={appActionBusy === a.package}
-                      data-tip="Back up this app's APKs to this computer"
-                      data-tip-align="end"
-                      aria-label={`Back up the APK for ${a.name}`}
-                    ><Icon name="download" size={16} /></button>
-                    <button
-                      class="tool-btn"
-                      onclick={() => startClone(a.package)}
-                      disabled={appActionBusy === a.package}
-                      data-tip="Copy to another TV — app data does not transfer"
-                      data-tip-align="end"
-                      aria-label={`Copy ${a.name} to another TV`}
-                    ><Icon name="swap_horiz" size={16} /></button>
-                  {/if}
-                  {#if a.play_store}
-                    <button
-                      class="tool-btn"
-                      onclick={() => openInPlayStore(a.package)}
-                      disabled={appActionBusy === a.package}
-                      data-tip="Open on the Play Store on the TV"
-                      data-tip-align="end"
-                      aria-label={`Open ${a.name} on the Play Store`}
-                    ><Icon name="shop" size={16} /></button>
-                  {:else}
-                    <span class="tool-slot-empty" aria-hidden="true"></span>
-                  {/if}
-                  </div>
-                  </div>
-                </td>
-                {/snippet}
-              </AppRow>
-            {/each}
-            {#if visibleApps.length === 0}
-              <tr><td colspan="6" class="muted">No curated apps match your filters.</td></tr>
-            {/if}
-          </tbody>
-        </table>
-        <!-- The board puts the tool legend here rather than in a column head:
-             three icons repeated down hundreds of rows only need naming once. -->
-        <p class="tool-legend">
-          <span><Icon name="download" size={14} /> back up APK</span>
-          <span><Icon name="swap_horiz" size={14} /> copy to TV</span>
-          <span><Icon name="shop" size={14} /> Play Store</span>
-        </p>
-
-        <div class="other-apps">
-          <h3>Everything else {othersLoaded ? `(${visibleOthers.length})` : ""}</h3>
-          <p class="muted small">
-            Installed apps that aren't in the curated list — sideloaded apps (SmartTube etc.)
-            get the same <strong>Backup</strong> and <strong>Copy to…</strong> tools.
-            Removals here still go through the same safety checks as the curated list.
-            {showSystemOthers ? "Showing system packages too." : "System packages are hidden; tick \"Show system packages\" to include them."}
-          </p>
-          {#if othersErr}
-            <div class="error">
-              {othersErr}
-              <button class="small-action" onclick={loadOtherPackages} disabled={othersLoading}>Retry other packages</button>
-            </div>
-          {:else if othersLoading}
-            <div class="muted">Loading installed packages…</div>
-          {:else if !othersLoaded}
-            <p class="muted">Other-package inventory is unavailable. Retry to load it.</p>
-          {:else if visibleOthers.length === 0}
-            <p class="muted">{otherPackages.length === 0 ? "No non-catalog packages found." : "Nothing matches your filters."}</p>
-          {:else}
-            <!-- Same shape as the curated table above it. These are the same
-                 kind of row about the same kind of thing, so a reader should
-                 not have to learn two layouts on one screen. Type rides with
-                 the name as a tag, the way the state pill does. -->
-            <table class="app-table">
-              <thead>
-                <tr>
-                  <th><span class="sr-only">Details</span></th>
-                  <th>App</th>
-                  <th>Verdict &amp; source</th>
-                  <th class="right">RAM</th>
-                  <th class="right">Last used</th>
-                  <th class="controls-start">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each visibleOthers as o (o.package)}
-                  {@const safety = packageSafety[o.package]}
-                  {@const canRemove = othersLoaded && safety?.status === "ready" && !isBlocked(safety.verdict)}
-                  <AppRow
-                    name={o.name ?? o.package}
-                    description={o.description ?? undefined}
-                    package={o.package}
-                    state={o.enabled ? "enabled" : "disabled"}
-                    mb={appMemory[o.package]}
-                    usage={appUsage[o.package]}
-                    safety={safety?.status === "ready" ? safety.verdict : null}
-                    safetyStatus={safety?.status ?? "unavailable"}
-                    safetyUnavailableReason={safety?.status === "unavailable" ? safety.reason : undefined}
-                    extraTag={o.system ? "SYSTEM" : "3RD-PARTY"}
-                    extraTagKind={o.system ? "neutral" : "ok"}
-                    userInstalled={!o.system}
-                    detailOpen={expandedSafety === o.package}
-                    onToggleDetail={() =>
-                      (expandedSafety = expandedSafety === o.package ? null : o.package)}
-                    details={appDetails(o.package)}
-                  >
-                    {#snippet actions()}
-                    <td class="rec-cell controls-start">
-                      <div class="actions-cell">
-                        <div class="row-verbs">
-                        {#if o.enabled}
-                          <button class="small-action subtle" onclick={() => disableOther(o.package)} disabled={appActionBusy === o.package || appMutationInFlight || !canRemove} data-tip="Needs a completed safety check and a current package list">Disable</button>
-                          <button class="small-action subtle danger" onclick={() => uninstallOther(o.package)} disabled={appActionBusy === o.package || appMutationInFlight || !canRemove} data-tip="Needs a completed safety check and a current package list">Uninstall</button>
-                        {:else}
-                          <button class="small-action subtle" onclick={() => enableOther(o.package)} disabled={appActionBusy === o.package || appMutationInFlight} data-tip="pm enable">Enable</button>
-                        {/if}
-                        </div>
-                        <span class="tool-sep" aria-hidden="true"></span>
-                        <div class="row-tools">
-                        <button
-                          class="tool-btn"
-                          onclick={() => backupApkFor(o.package)}
-                          disabled={appActionBusy === o.package}
-                      data-tip="Back up this app's APKs to this computer"
-                      data-tip-align="end"
-                          aria-label={`Back up the APK for ${o.name ?? o.package}`}
-                        ><Icon name="download" size={16} /></button>
-                        <button
-                          class="tool-btn"
-                          onclick={() => startClone(o.package)}
-                          disabled={appActionBusy === o.package}
-                      data-tip="Copy to another TV — app data does not transfer"
-                      data-tip-align="end"
-                          aria-label={`Copy ${o.name ?? o.package} to another TV`}
-                        ><Icon name="swap_horiz" size={16} /></button>
-                        <span class="tool-slot-empty" aria-hidden="true"></span>
-                        </div>
-                      </div>
-                    </td>
-                    {/snippet}
-                  </AppRow>
-                {/each}
-              </tbody>
-            </table>
-            <p class="tool-legend">
-              <span><Icon name="download" size={14} /> back up APK</span>
-              <span><Icon name="swap_horiz" size={14} /> copy to TV</span>
-            </p>
-          {/if}
-        </div>
-      {/if}
-    </div>
-  {:else if activeTab === "snapshot"}
-    <div class="card" role="tabpanel" tabindex={0} id="tabpanel-snapshot" aria-labelledby="tab-snapshot">
+    <div class="card section-card" id="tabpanel-snapshot">
       <div class="card-header">
-        <div class="header-title">
-          <h2><Icon name="history" size={20} /> Snapshot <span class="beta-tag">Beta</span></h2>
-          <p class="muted small mono header-sub">
-            disabled apps, Home app &amp; system settings for this device
-          </p>
-        </div>
+        <h2>Snapshots <span class="tag beta-tag">Beta</span></h2>
         <button class="primary" onclick={saveSnapshot} disabled={saveBusy}>
-          <Icon name="save" size={16} /> {saveBusy ? "Saving…" : "Save snapshot"}
+          {saveBusy ? "Saving…" : "Save current state"}
         </button>
       </div>
-      <p class="muted small snap-explainer">
-        A snapshot records which apps are disabled, your Home app and a set of display, audio, HDMI-CEC and screensaver settings.
-        Restoring it disables those apps again and puts the settings back. It never
-        re-enables anything or reinstalls apps.
-      </p>
       {#if saveResult}<p class="muted small">{saveResult}</p>{/if}
       {#if snapshotsErr}<div class="error">{snapshotsErr}</div>{/if}
-
-      <div class="snap-layout">
-        <div class="snap-col">
       {#if snapshots.length === 0}
         <p class="muted">No snapshots yet. Use the button above to save one.</p>
       {:else}
-        <p class="rail-label">Saved · {snapshots.length}</p>
         <ul class="snap-list">
           {#each snapshots as s (s.path)}
-            {@const selected = previewPath === s.path}
-            <li class:is-selected={selected}>
-              <span class="snap-icon" aria-hidden="true"><Icon name="history" size={18} /></span>
+            <li>
               <div class="snap-main">
                 <div class="snap-title">
                   <strong>{s.label ?? s.device_name}</strong>
+                  <span class="tag installed">{deviceTypeLabel(s.device_type).toUpperCase()}</span>
                   {#if s.label}<span class="muted small">{s.device_name}</span>{/if}
-                  <!-- The action rides on the title's line so the summary below
-                       gets the full width; squeezed beside it, the summary
-                       wrapped onto five lines. -->
-                  <span class="snap-actions">
-                    {#if selected}
-                      <span class="tag installed">SELECTED</span>
-                    {:else}
-                      <button class="small-action" onclick={() => previewSnapshot(s.path)}>Preview restore</button>
-                    {/if}
-                  </span>
                 </div>
-                <div class="muted small mono snap-meta">
-                  {snapTimestamp(s.saved_at)} · {s.disabled_count} disabled ·
-                  {s.settings_count} settings · launcher {s.launcher ?? "—"}
+                <div class="muted small">
+                  {snapTimestamp(s.saved_at)} ·
+                  {s.disabled_count} disabled,
+                  {s.settings_count} settings,
+                  launcher {s.launcher ?? "—"}
                 </div>
+              </div>
+              <div class="snap-actions">
+                <button class="small-action" onclick={() => previewSnapshot(s.path)}>Preview restore</button>
               </div>
             </li>
           {/each}
         </ul>
       {/if}
-      {#if preview && previewPath}
-        {@const chosen = snapshots.find((s) => s.path === previewPath)}
-        {#if chosen}
-          <!-- What is inside the thing you picked, before you read what it
-               would do — board 11.10's "contents of selection". -->
-          <div class="foot-card snap-contents">
-            <span class="foot-label">Contents of selection</span>
-            <dl class="snap-contents-list">
-              <dt>Disabled apps</dt><dd class="mono">{chosen.disabled_count}</dd>
-              <dt>Launcher</dt><dd class="mono">{chosen.launcher ?? "—"}</dd>
-              <dt>Tweak values</dt><dd class="mono">{chosen.settings_count}</dd>
-            </dl>
-          </div>
-        {/if}
-      {/if}
-        </div>
-
-        <div class="snap-col">
       {#if previewBusy}
         <p class="muted">Computing plan…</p>
       {:else if previewErr}
         <div class="error">{previewErr}</div>
       {:else if preview && previewPath}
-        {@const settingsToWrite = Object.entries(preview.settings_to_write)}
-        {@const nowValues = preview.current_values ?? {}}
-        {@const snapLauncher = snapshots.find((s) => s.path === previewPath)?.launcher ?? null}
-        {@const launcherUnchanged =
-          !preview.launcher_to_set && !preview.launcher_not_installed && snapLauncher !== null}
-        {@const willChange =
-          preview.packages_to_disable.length +
-          settingsToWrite.length +
-          preview.settings_to_delete.length +
-          (preview.launcher_to_set ? 1 : 0)}
-        {@const unchanged =
-          preview.packages_already_disabled.length +
-          preview.packages_not_installed.length +
-          preview.settings_already_set.length +
-          (launcherUnchanged || preview.launcher_not_installed ? 1 : 0)}
-        <p class="rail-label">Restore plan — preview before running</p>
-        {#if preview.cross_device_warning}
-          <div class="warning">{preview.cross_device_warning}</div>
-        {/if}
-        <!-- Row per item, as the board has it: what it is now and what this
-             snapshot would make it. "Now" is left blank where the device has
-             not told us — a preview that guesses is worse than one that says
-             it does not know. -->
-        <div class="plan-box">
+        <div class="preview-box">
+          <h3>Plan preview</h3>
+          {#if preview.cross_device_warning}
+            <div class="warning">{preview.cross_device_warning}</div>
+          {/if}
           <table class="plan-table">
-            <thead>
-              <tr><th>Item</th><th>Now</th><th>Will become</th></tr>
-            </thead>
+            <thead><tr><th>Setting</th><th>Now</th><th>After restore</th></tr></thead>
             <tbody>
-              {#each preview.packages_to_disable as pkg (pkg)}
-                <tr><td class="mono">{pkg}</td><td class="plan-now">ENABLED</td><td class="plan-next change">→ DISABLED</td></tr>
-              {/each}
-              {#if preview.launcher_to_set}
-                <tr data-plan-item="launcher">
-                  <td class="mono">Home app</td>
-                  <td class="plan-now mono">{preview.current_launcher ?? "—"}</td>
-                  <td class="plan-next change mono">→ {preview.launcher_to_set}</td>
-                </tr>
-              {/if}
-              {#each settingsToWrite as [key, value] (key)}
-                <tr>
-                  <td class="mono">{key}</td>
-                  <td class="plan-now mono">{nowValues[key] ?? "UNSET"}</td>
-                  <td class="plan-next mono change">→ {value}</td>
-                </tr>
-              {/each}
-              {#each preview.settings_to_delete as key (key)}
-                <tr>
-                  <td class="mono">{key}</td>
-                  <td class="plan-now mono">{nowValues[key] ?? "—"}</td>
-                  <td class="plan-next change">→ DEVICE DEFAULT</td>
-                </tr>
-              {/each}
-              {#if launcherUnchanged}
-                <tr class="plan-noop" data-plan-item="launcher">
-                  <td class="mono">Home app</td>
-                  <td class="plan-now mono">{preview.current_launcher ?? "—"}</td>
-                  <td class="plan-next">→ {snapLauncher} (no change)</td>
-                </tr>
-              {:else if preview.launcher_not_installed}
-                <tr class="plan-noop" data-plan-item="launcher">
-                  <td class="mono">Home app</td>
-                  <td class="plan-now mono">{preview.current_launcher ?? "—"}</td>
-                  <td class="plan-next">→ skipped ({preview.launcher_not_installed} isn't installed)</td>
-                </tr>
-              {/if}
-              {#each preview.settings_already_set as key (key)}
-                <tr class="plan-noop">
-                  <td class="mono">{key}</td>
-                  <td class="plan-now mono">{nowValues[key] ?? "UNSET"}</td>
-                  <td class="plan-next mono">→ {nowValues[key] ?? "DEVICE DEFAULT"} (no change)</td>
-                </tr>
-              {/each}
-              {#each preview.packages_already_disabled as pkg (pkg)}
-                <tr class="plan-noop"><td class="mono">{pkg}</td><td class="plan-now">DISABLED</td><td class="plan-next">→ DISABLED (no change)</td></tr>
-              {/each}
-              {#each preview.packages_not_installed as pkg (pkg)}
-                <tr class="plan-noop"><td class="mono">{pkg}</td><td class="plan-now">NOT INSTALLED</td><td class="plan-next">→ skipped</td></tr>
+              <tr data-plan-item="launcher" class:plan-noop={!preview.launcher_to_set}><td>Launcher</td><td>{preview.current_launcher ?? "Unknown"}</td><td>{preview.launcher_to_set ?? "Unchanged"}</td></tr>
+              {#each [...new Set([...Object.keys(preview.settings_to_write), ...preview.settings_already_set, ...preview.settings_to_delete])] as key (key)}
+                <tr class:plan-noop={preview.settings_already_set.includes(key)}><td>{key}</td><td>{preview.current_values[key] === "" ? "(empty)" : preview.current_values[key] ?? "(unset)"}</td><td>{preview.settings_to_delete.includes(key) ? "(unset)" : preview.settings_to_write[key] ?? preview.current_values[key] ?? "(unset)"}</td></tr>
               {/each}
             </tbody>
           </table>
-        </div>
-        <div class="plan-totals">
-          <div class="foot-card">
-            <span class="foot-label">Will change</span>
-            <span class="mono plan-total">{willChange} item{willChange === 1 ? "" : "s"}</span>
+          <ul>
+            <li><strong>{preview.packages_to_disable.length}</strong> packages will be disabled</li>
+            <li><strong>{preview.packages_already_disabled.length}</strong> already disabled (no-op)</li>
+            <li><strong>{preview.packages_not_installed.length}</strong> not present on device</li>
+            <li>Launcher: <code>{preview.launcher_to_set ?? "(unchanged)"}</code></li>
+            <li><strong>{Object.keys(preview.settings_to_write).length}</strong> settings will be written; <strong>{preview.settings_to_delete.length}</strong> settings will be reset
+              {#if preview.settings_already_set.length > 0}
+                <span class="muted">({preview.settings_already_set.length} already set, no-op)</span>
+              {/if}
+            </li>
+          </ul>
+          <div class="apply-row">
+            <button
+              class="primary"
+              onclick={applySnapshot}
+              disabled={applyBusy || applyResult !== null}
+            >
+              {applyBusy ? "Applying…" : applyResult ? "Applied" : "Apply this snapshot"}
+            </button>
+            <span class="muted small">
+              Disable is reversible via Emergency Recovery above.
+            </span>
           </div>
-          <div class="foot-card">
-            <span class="foot-label">Unchanged</span>
-            <span class="mono plan-total">{unchanged} item{unchanged === 1 ? "" : "s"}</span>
-          </div>
-        </div>
-        <div class="apply-row">
-          <button
-            class="primary apply-btn"
-            onclick={applySnapshot}
-            disabled={applyBusy || applyResult !== null}
-          >
-            {applyBusy ? "Restoring…" : applyResult ? "Restored" : "Restore this snapshot"}
-          </button>
-          <span class="muted small">
-            Disable is reversible via Emergency Recovery on the Overview tab.
-          </span>
-        </div>
-        {#if applyErr || applyResult}
-        <div class="preview-box">
           {#if applyErr}
             <div class="error">{applyErr}</div>
           {/if}
@@ -3470,28 +1858,858 @@
             </div>
           {/if}
         </div>
-        {/if}
-      {:else}
-        <p class="rail-label">Restore plan — preview before running</p>
-        <div class="plan-empty">
-          <Icon name="history" size={28} />
-          <strong>No snapshot selected</strong>
-          <span class="small">
-            Pick one on the left and this shows every package and setting it would
-            change, and every one it would leave alone, before anything runs.
-          </span>
-        </div>
       {/if}
+    </div>
+  {:else if activeTab === "health"}
+    <div class="card" role="tabpanel" tabindex={0} id="tabpanel-health" aria-labelledby="tab-health">
+      <div class="card-header">
+        <h2>Health</h2>
+        <div class="header-actions">
+          <label class="live-refresh">
+            <input type="checkbox" checked={liveRefresh} onchange={toggleLiveRefresh} />
+            Live refresh
+          </label>
+          <span class="muted small" title={reportLastRefreshed?.toISOString() ?? ""}>
+            {refreshLabel}
+          </span>
+          <button
+            onclick={clearCaches}
+            disabled={trimBusy}
+            title="pm trim-caches — clears every app's cache; caches rebuild on next launch"
+          >
+            {trimBusy ? "Clearing…" : "Clear caches"}
+          </button>
+          <button
+            onclick={killBackground}
+            disabled={killBusy}
+            title="am kill-all — frees RAM by killing background apps; they restart on next use"
+          >
+            {killBusy ? "Killing…" : "Kill background"}
+          </button>
+          <button onclick={loadHealth} disabled={reportLoading}>
+            {reportLoading ? "Loading…" : "Refresh"}
+          </button>
         </div>
       </div>
+      {#if trimMessage}
+        <p class="muted small mono">{trimMessage}</p>
+      {/if}
+      {#if reportErr}
+        <div class="error">{reportErr}</div>
+      {:else if !report}
+        <div class="muted">{reportLoading ? "Querying…" : "—"}</div>
+      {:else}
+        <h3>Vitals</h3>
+        <dl class="kv">
+          <dt>Temperature</dt>
+          <dd>{report.temperature_c != null ? `${report.temperature_c.toFixed(1)}°C` : "—"}</dd>
+          {#if report.ram.total_mb != null}
+            <dt>RAM</dt>
+            <dd>
+              {report.ram.used_mb ?? "?"} / {report.ram.total_mb} MB
+              {#if report.ram.total_mb && report.ram.used_mb != null}
+                ({Math.round((report.ram.used_mb / report.ram.total_mb) * 100)}%)
+              {/if}
+            </dd>
+          {/if}
+          {#if report.ram.swap_mb != null}
+            <dt>Swap</dt><dd>{report.ram.swap_mb} MB</dd>
+          {/if}
+          {#if report.storage.total}
+            <dt>Storage</dt>
+            <dd>
+              {report.storage.used ?? "?"} / {report.storage.total}
+              {#if report.storage.used_percent != null}({report.storage.used_percent}%){/if}
+            </dd>
+          {/if}
+        </dl>
+
+        <h3>Display & Audio</h3>
+        <dl class="kv">
+          <dt>Resolution</dt><dd>{report.display.resolution ?? "—"}</dd>
+          <dt>Refresh</dt><dd>{report.display.refresh_hz ? `${report.display.refresh_hz} Hz` : "—"}</dd>
+          <dt>HDR</dt><dd>{report.display.hdr_types.length ? report.display.hdr_types.join(", ") : "SDR only"}</dd>
+          <dt>Audio out</dt><dd>{report.audio_device ?? "—"}</dd>
+        </dl>
+
+        {#if resourceErr}<p class="error">Resource sample: {resourceErr}</p>{/if}
+        {#if resourceSample}
+          <dl class="vitals"><dt>CPU</dt><dd>{resourceSample.cpu_percent === null ? "Unavailable" : `${resourceSample.cpu_percent.toFixed(1)}%`}</dd>
+          {#each resourceSample.interfaces as net (net.name)}<dt>{net.name}</dt><dd>↓ {net.rx_bytes_per_s === null ? "Unavailable" : `${formatBytes(net.rx_bytes_per_s)}/s`} · ↑ {net.tx_bytes_per_s === null ? "Unavailable" : `${formatBytes(net.tx_bytes_per_s)}/s`}</dd>{/each}</dl>
+        {/if}
+        <h3>Top memory users</h3>
+        {#if report.top_memory.length === 0}
+          <p class="muted">No process data.</p>
+        {:else}
+          <table class="mem-table">
+            <thead>
+              <tr><th class="num">RAM</th><th>Package</th><th>Suggestion</th><th class="center">Risk</th><th></th></tr>
+            </thead>
+            <tbody>
+              {#each report.top_memory as m}
+                {#if m.package}
+                {@const pkg = m.package}
+                {@const entry = catalogEntry(pkg)}
+                {@const safety = safetyMap[pkg] ?? { kind: "unknown", reason: "Safety has not been checked.", source: "no_record" }}
+                {@const blocked = safety.kind === "never_disable"}
+                {@const overridden = !!safetyOverrides[pkg]}
+                {@const dangerAction = !overridden && (!entry || entry.risk === "high" || entry.risk === "advanced" || safety.kind === "caution")}
+                <tr class:dim={blocked} data-process={m.process} data-package={pkg}>
+                  <td
+                    class="num"
+                    class:warn={m.mb >= 200}
+                    class:caution={m.mb >= 100 && m.mb < 200}
+                  >
+                    {m.mb.toFixed(1)} MB
+                  </td>
+                  <td class="pkg"><button class="small-action subtle" onclick={() => { appSearch = pkg; activeTab = "apps"; }}>{m.process}</button><span class="muted small">{m.pid === null ? "" : ` · pid ${m.pid}`}</span></td>
+                  <td class="suggestion-cell" data-verdict={safetyMap[pkg]?.kind ?? "checking"} data-suggestion={entry ? "recommendation" : "app"}>{keptPackages.has(pkg) ? "Kept" : entry ? recommendation(entry, "enabled").label : "No change needed"}</td>
+                  <td class="center risk-cell">
+                    <RiskBadge
+                      pkg={pkg}
+                      name={entry?.name}
+                      tier={entry?.risk}
+                      description={entry?.optimize_description}
+                      {safety}
+                      {overridden}
+                      busy={overrideBusy === pkg}
+                      onToggleSafe={toggleSafetyOverride}
+                    />
+                  </td>
+                  <td class="row-actions">
+                    <div class="tool-group">
+                      <button
+                        class="small-action subtle"
+                        onclick={() => forceStopFromMemory(pkg)}
+                        disabled={appActionBusy === pkg}
+                        title="am force-stop {pkg} — frees its RAM now; the app restarts on next launch"
+                      >
+                        {#if appActionBusy === pkg}
+                          <span class="busy"><span class="spinner" aria-hidden="true"></span>Stopping…</span>
+                        {:else}
+                          Force stop
+                        {/if}
+                      </button>
+                      <button
+                        class="small-action subtle"
+                        onclick={() => clearCacheFor(pkg)}
+                        disabled={appActionBusy === pkg}
+                        title="pm clear-cache {pkg} — drops cached files; safe, rebuilds on next launch"
+                      >
+                        Clear cache
+                      </button>
+                      {#if safety.kind === "never_disable"}
+                        <span class="muted small" title={safety.reason}>Protected</span>
+                      {:else}
+                        <button
+                          class="small-action"
+                          class:danger={dangerAction}
+                          onclick={() => safeDisableFromMemory(pkg, m.mb)}
+                          disabled={appActionBusy === pkg}
+                          title="pm disable-user --user 0 {pkg}"
+                        >
+                          {#if appActionBusy === pkg}
+                            <span class="busy"><span class="spinner" aria-hidden="true"></span>Disabling…</span>
+                          {:else}
+                            Disable
+                          {/if}
+                        </button>
+                      {/if}
+                    </div>
+                  </td>
+                </tr>
+                {:else}
+                <tr data-process={m.process} data-package=""><td class="num">{m.mb.toFixed(1)} MB</td><td class="pkg">{m.process}<span class="muted small">{m.pid === null ? "" : ` · pid ${m.pid}`}</span></td><td colspan="2" class="muted suggestion-cell" data-verdict={processSafetyMap[m.process]?.kind ?? "checking"} data-suggestion="process">Not an app</td></tr>
+                {/if}
+              {/each}
+            </tbody>
+          </table>
+          {#if appActionMessage}
+            <p class="muted small mono">
+              {appActionMessage}
+              <button class="dismiss" onclick={() => (appActionMessage = "")} title="Dismiss">✕</button>
+            </p>
+          {/if}
+        {/if}
+
+        <h3>Storage by category</h3>
+        <p class="muted small">Device storage only — the read-only system image isn't counted.</p>
+        {#if diskSegments.length === 0}
+          <p class="muted">
+            This device didn't report a storage breakdown. Android builds it from a
+            daily background job, so it can be empty until that first runs.
+          </p>
+        {:else}
+          <div
+            class="disk-bar"
+            role="img"
+            aria-label={diskSegments.map((s) => `${s.label} ${formatBytes(s.bytes)}`).join(", ")}
+          >
+            {#each diskSegments as seg}
+              <span
+                class="disk-seg"
+                style="width:{seg.pct}%; background:var(--disk-{seg.key});"
+                title="{seg.label}: {formatBytes(seg.bytes)}"
+              ></span>
+            {/each}
+          </div>
+          <ul class="disk-legend">
+            {#each diskSegments as seg}
+              <li>
+                <span class="swatch" style="background:var(--disk-{seg.key});"></span>
+                {seg.label}
+                <span class="muted">{formatBytes(seg.bytes)}</span>
+              </li>
+            {/each}
+            {#if diskFreeBytes > 0}
+              <li>
+                <span class="swatch free"></span>
+                Free
+                <span class="muted">{formatBytes(diskFreeBytes)}</span>
+              </li>
+            {/if}
+          </ul>
+        {/if}
+
+        <h3>Storage by app</h3>
+        {#if report.disk.packages.length === 0}
+          <p class="muted">No per-app storage data on this device.</p>
+        {:else}
+          <table class="mem-table storage-table">
+            <thead>
+              <tr>
+                <th class="num">Total</th>
+                <th>Package</th>
+                <th class="num">App</th>
+                <th class="num">Data</th>
+                <th class="num">Cache</th>
+                <th class="center">Risk</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each report.disk.packages as p}
+                {@const entry = catalogEntry(p.package)}
+                {@const safety = safetyMap[p.package] ?? { kind: "safe" }}
+                {@const overridden = !!safetyOverrides[p.package]}
+                <tr class:dim={safety.kind === "never_disable"}>
+                  <td
+                    class="num"
+                    class:warn={p.total_bytes >= 500 * 1024 * 1024}
+                    class:caution={p.total_bytes >= 200 * 1024 * 1024 && p.total_bytes < 500 * 1024 * 1024}
+                  >
+                    {formatBytes(p.total_bytes)}
+                  </td>
+                  <td class="pkg">
+                    {entry?.name ?? p.package}
+                    <div class="muted small mono">{p.package}</div>
+                  </td>
+                  <td class="num muted">{formatBytes(p.app_bytes)}</td>
+                  <td class="num muted">{formatBytes(p.data_bytes)}</td>
+                  <td class="num muted">{formatBytes(p.cache_bytes)}</td>
+                  <td class="center risk-cell">
+                    <RiskBadge
+                      pkg={p.package}
+                      name={entry?.name}
+                      tier={entry?.risk}
+                      description={entry?.optimize_description}
+                      {safety}
+                      {overridden}
+                      busy={overrideBusy === p.package}
+                      onToggleSafe={toggleSafetyOverride}
+                    />
+                  </td>
+                  <td class="row-actions">
+                    <div class="tool-group">
+                      <button
+                        class="small-action subtle"
+                        onclick={() => clearCacheFor(p.package)}
+                        disabled={appActionBusy === p.package}
+                        title="pm clear-cache {p.package} — frees {formatBytes(p.cache_bytes)}; rebuilds on next launch"
+                      >
+                        Clear cache
+                      </button>
+                      <button
+                        class="small-action subtle"
+                        onclick={() => clearDataFor(p.package)}
+                        disabled={appActionBusy === p.package}
+                        title="pm clear {p.package} — wipes accounts, settings and downloads; not reversible"
+                      >
+                        Clear data
+                      </button>
+                      {#if safety.kind === "never_disable"}
+                        <span class="muted small" title={safety.reason}>Protected</span>
+                      {:else}
+                        <button
+                          class="small-action danger"
+                          onclick={() => uninstallFromStorage(p.package)}
+                          disabled={appActionBusy === p.package}
+                          title="pm uninstall --user 0 {p.package} — frees {formatBytes(p.total_bytes)}"
+                        >
+                          {#if appActionBusy === p.package}
+                            <span class="busy"><span class="spinner" aria-hidden="true"></span>Removing…</span>
+                          {:else}
+                            Uninstall
+                          {/if}
+                        </button>
+                      {/if}
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+
+        <div class="files-header">
+          <h3>Files on /sdcard</h3>
+          <button onclick={() => loadUsage(usagePath)} disabled={usageLoading}>
+            {usageLoading ? "Scanning…" : usage ? "Rescan" : "Scan"}
+          </button>
+        </div>
+        {#if usageErr}
+          <div class="error">{usageErr}</div>
+        {/if}
+        {#if !usage}
+          <p class="muted">
+            {usageLoading
+              ? "Walking the directory…"
+              : "Scan to see which folders and files fill user storage. App data isn't counted here — that's the table above."}
+          </p>
+        {:else}
+          <nav class="crumbs" aria-label="Folder path">
+            {#each usageCrumbs as crumb, i}
+              {#if i > 0}<span class="crumb-sep">/</span>{/if}
+              {#if i === usageCrumbs.length - 1}
+                <span class="crumb current">{crumb.label}</span>
+              {:else}
+                <button class="crumb link" onclick={() => loadUsage(crumb.path)}>{crumb.label}</button>
+              {/if}
+            {/each}
+            <span class="muted small">· {formatBytes(usage.total_bytes)} total</span>
+          </nav>
+          {#if usage.children.length === 0}
+            <p class="muted">Nothing here.</p>
+          {:else}
+            <ul class="usage-list">
+              {#each usage.children as child}
+                <li>
+                  <span class="usage-bar" style="width:{usagePct(child.bytes)}%"></span>
+                  <span class="usage-name">
+                    {#if child.is_dir}
+                      <button class="crumb link" onclick={() => loadUsage(child.path)}>
+                        📁 {basename(child.path)}
+                      </button>
+                    {:else}
+                      <span class="mono">{basename(child.path)}</span>
+                    {/if}
+                  </span>
+                  <span class="usage-size">{formatBytes(child.bytes)}</span>
+                  <button
+                    class="small-action danger"
+                    onclick={() => deleteFromUsage(child.path)}
+                    disabled={usageLoading}
+                    title="Delete {child.path} from the device — permanent"
+                  >Delete</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if usage.largest_files.length > 0}
+            <h4>Largest files below {usagePath}</h4>
+            <ul class="usage-list">
+              {#each usage.largest_files as f}
+                <li>
+                  <span class="usage-bar" style="width:{usagePct(f.bytes)}%"></span>
+                  <span class="usage-name mono" title={f.path}>{relativeToScan(f.path)}</span>
+                  <span class="usage-size">{formatBytes(f.bytes)}</span>
+                  <button
+                    class="small-action danger"
+                    onclick={() => deleteFromUsage(f.path)}
+                    disabled={usageLoading}
+                    title="Delete {f.path} from the device — permanent"
+                  >Delete</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
+      {/if}
+    </div>
+  {:else if activeTab === "apps"}
+    <div class="card" role="tabpanel" tabindex={0} id="tabpanel-apps" aria-labelledby="tab-apps">
+      <div class="card-header">
+        <h2>App List for {deviceTypeLabel(device.device_type)}</h2>
+        <div class="header-actions">
+          <span class="muted">
+            {visibleRows.length} shown{othersLoading ? " · scanning device…" : ` of ${allRows.length}`}
+          </span>
+          <button onclick={loadApps} disabled={appsLoading}>
+            {appsLoading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+      <div class="app-toolbar">
+        <input
+          class="app-search"
+          placeholder="Search apps by name or package…"
+          bind:value={appSearch}
+        />
+        <div class="kind-chips" role="group" aria-label="Filter by app kind">
+          <button
+            class="chip"
+            class:on={kindFilter.curated}
+            aria-pressed={kindFilter.curated}
+            onclick={() => (kindFilter.curated = !kindFilter.curated)}
+            title="Apps in Shield Optimizer's curated list for this device — the ones with a recommendation"
+          >Curated <span class="chip-count">{kindCounts.curated}</span></button>
+          <button
+            class="chip"
+            class:on={kindFilter.user}
+            aria-pressed={kindFilter.user}
+            onclick={() => (kindFilter.user = !kindFilter.user)}
+            title="Apps you installed yourself — sideloads and Play Store installs"
+          >User <span class="chip-count">{kindCounts.user}</span></button>
+          <button
+            class="chip"
+            class:on={kindFilter.system}
+            aria-pressed={kindFilter.system}
+            onclick={() => (kindFilter.system = !kindFilter.system)}
+            title="Preinstalled system packages — disable these only if you know what they are"
+          >System <span class="chip-count">{kindCounts.system}</span></button>
+        </div>
+        <label class="inline-check">
+          <input type="checkbox" bind:checked={hideNotInstalled} />
+          Hide not installed
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" bind:checked={onlyRecommended} />
+          Needs action
+        </label>
+      </div>
+      {#if appsErr}
+        <div class="error">{appsErr}</div>
+      {:else if appsLoading && apps.length === 0}
+        <div class="muted">Loading…</div>
+      {:else}
+        <p class="muted small legend">
+          One row per package on this device — <strong>Curated</strong> is the list we
+          maintain for this hardware, <strong>User</strong> what you installed, and
+          <strong>System</strong> the preinstalled tail (hidden by default).
+          <strong>State</strong> is what the device reports right now, and
+          <strong>Last used</strong> when it was last in the foreground — highlighted
+          once it's stale, which is the cue for removing it.
+          <strong>Risk</strong> explains itself on hover — including how the rating was
+          decided, and a button to mark an app safe on this device.
+          <strong>Recommended</strong> is what v1's Optimize wizard would pick for you —
+          ✅ means nothing to do; a green or red button applies the suggested change.
+          <strong>Tools</strong> holds each row's actions.
+        </p>
+        {#if appActionMessage}
+          <p class="muted small mono action-message">
+            {appActionMessage}
+            <button class="dismiss" onclick={() => (appActionMessage = "")} title="Dismiss">✕</button>
+          </p>
+        {/if}
+        {#if clonePkg}
+          <div class="clone-panel">
+            <span>Copy <code>{clonePkg}</code> to:</span>
+            {#each cloneTargets as t (t.serial)}
+              <button class="small-action" onclick={() => cloneTo(t)} disabled={cloneBusy}>
+                {cloneBusy ? "Copying…" : `${t.name} (${t.serial})`}
+              </button>
+            {/each}
+            <button class="small-action subtle" onclick={() => (clonePkg = null)} disabled={cloneBusy}>
+              Cancel
+            </button>
+          </div>
+        {/if}
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>App</th>
+              <th class="center">State</th>
+              <th class="center">Last used</th>
+              <th class="center">Risk</th>
+              <th class="center">Recommended</th>
+              <th class="center">Manage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleRows as r (r.package)}
+              {@const rec = rowRecommendation(r)}
+              <AppRow
+                name={r.name}
+                description={r.description}
+                package={r.package}
+                review={r.review}
+                state={r.state}
+                kind={r.kind}
+                mb={appMemory[r.package]}
+                usage={appUsage[r.package]}
+                usageWindowSecs={usageWindowSecs}
+                showUsage={r.state !== "missing"}
+                usageColumn
+                risk={r.risk}
+                safety={safetyMap[r.package]}
+                overridden={!!safetyOverrides[r.package]}
+                riskBusy={overrideBusy === r.package}
+                onToggleSafe={toggleSafetyOverride}
+                details={appDetails(r.package)}
+                detailOpen={expandedApp === r.package}
+                onToggleDetail={() => expandedApp = expandedApp === r.package ? null : r.package}
+              >
+                {#snippet actions()}
+                <td class="rec-cell center">
+                  {#if keptPackages.has(r.package)}
+                    <span data-rec="Kept">Kept</span>
+                    <button class="small-action subtle" onclick={() => keptPackages = setPackageKept(hardwareId, r.package, false)}>Change</button>
+                  {:else}
+                  {#if rec.kind === "act"}
+                    <button
+                      data-rec={rec.label}
+                      class="small-action recommended danger"
+                      onclick={() => applyRecommendation(r.package, rec.action)}
+                      disabled={appActionBusy === r.package}
+                      title={r.description}
+                    >
+                      {appActionBusy === r.package ? "…" : rec.label}
+                    </button>
+                  {:else if rec.kind === "review"}
+                    <!-- Optional, not a default: an icon keeps it quieter than
+                         the recommended actions. The glyph tracks the action —
+                         a trash can on a reversible disable would overstate
+                         what the button does. -->
+                    <button
+                      data-rec={rec.label}
+                      class="small-action review-action icon-action"
+                      class:danger={rec.action === "uninstall"}
+                      onclick={() => applyRecommendation(r.package, rec.action)}
+                      disabled={appActionBusy === r.package}
+                      title={rec.action === "uninstall"
+                        ? "Uninstall — check Last used before uninstalling."
+                        : "Disable — you may not use this one. Check Last used, then disable it if that's right."}
+                      aria-label={rec.label}
+                    >
+                      {appActionBusy === r.package ? "…" : rec.action === "uninstall" ? "🗑" : "⊘"}
+                    </button>
+                  {:else if rec.kind === "restore"}
+                    <button
+                      class="small-action rec-enable"
+                      onclick={() => reinstallApp(r.package)}
+                      disabled={appActionBusy === r.package}
+                      title="cmd package install-existing — works for system apps still on /system"
+                    >
+                      {appActionBusy === r.package ? "…" : rec.label}
+                    </button>
+                  {:else if r.kind === "curated"}
+                    <span
+                      class="done-check"
+                      role="img"
+                      aria-label={rec.kind === "done" ? rec.label : "Keep — nothing to do"}
+                      title={rec.kind === "done" ? rec.label : "Keep — nothing to do"}
+                    >✅</span>
+                  {:else}
+                    <!-- Not in the curated list, so there is no recommendation to
+                         make — an empty cell says that better than a ✅ would. -->
+                    <span class="muted small">—</span>
+                  {/if}
+                  {#if hardwareId}<button class="small-action subtle" onclick={() => keptPackages = setPackageKept(hardwareId, r.package, true)}>Keep</button>{/if}
+                  {/if}
+                </td>
+                <td class="center tools-cell">
+                  {#if r.state !== "missing" || r.playStore}
+                    <div class="menu-wrap">
+                      <button
+                        class="small-action subtle"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          appMenuOpen = appMenuOpen === r.package ? null : r.package;
+                        }}
+                        disabled={appActionBusy === r.package}
+                        aria-haspopup="menu"
+                        aria-expanded={appMenuOpen === r.package}
+                        title="Uninstall, disable, clear data, back up {r.name}"
+                      >
+                        {appActionBusy === r.package ? "…" : "Manage ▾"}
+                      </button>
+                      {#if appMenuOpen === r.package}
+                        <!-- One menu for every row now. What's offered follows
+                             the package's real state, not which list it came
+                             from; the backend still refuses protected packages. -->
+                        <div class="actions-menu" role="menu">
+                          <button role="menuitem" onclick={() => { keptPackages = setPackageKept(hardwareId, r.package, !keptPackages.has(r.package)); appMenuOpen = null; }} disabled={!hardwareId}>{keptPackages.has(r.package) ? "Clear keep choice" : "Keep this app"}</button>
+                          {#if r.state === "enabled"}
+                            <button
+                              role="menuitem"
+                              onclick={() => { appMenuOpen = null; disableApp(r.package); }}
+                              title="pm disable-user --user 0"
+                            >Disable</button>
+                          {:else if r.state === "disabled"}
+                            <button
+                              role="menuitem"
+                              onclick={() => { appMenuOpen = null; enableApp(r.package); }}
+                              title="pm enable"
+                            >Enable</button>
+                          {/if}
+                          {#if r.state !== "missing"}
+                            <button
+                              role="menuitem"
+                              onclick={() => { appMenuOpen = null; backupApkFor(r.package); }}
+                              title="Save this app's APK(s) to a folder on this computer"
+                            >Backup</button>
+                            <button
+                              role="menuitem"
+                              onclick={() => { appMenuOpen = null; startClone(r.package); }}
+                              title="Install this app onto another connected device (app data does not transfer)"
+                            >Copy to…</button>
+                            <button
+                              role="menuitem"
+                              onclick={() => { appMenuOpen = null; clearCacheFor(r.package); }}
+                              title="pm clear-cache — drops cached files; safe, rebuilds on next launch"
+                            >Clear cache</button>
+                            <button
+                              role="menuitem"
+                              class="danger"
+                              onclick={() => { appMenuOpen = null; clearDataFor(r.package); }}
+                              title="pm clear — wipes accounts, settings, downloads; resets to fresh install (not reversible)"
+                            >Clear data</button>
+                            <button
+                              role="menuitem"
+                              class="danger"
+                              onclick={() => { appMenuOpen = null; uninstallApp(r.package); }}
+                              title="pm uninstall --user 0"
+                            >Uninstall</button>
+                          {/if}
+                          {#if r.playStore}
+                            <button
+                              role="menuitem"
+                              onclick={() => { appMenuOpen = null; openInPlayStore(r.package); }}
+                              title="Open {r.name} on the Play Store on the device"
+                            >Play Store</button>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <span class="muted small">—</span>
+                  {/if}
+                </td>
+                {/snippet}
+              </AppRow>
+            {/each}
+            {#if visibleRows.length === 0}
+              <tr>
+                <td colspan="6" class="muted">
+                  {othersLoading ? "Scanning the device…" : "No apps match your filters."}
+                </td>
+              </tr>
+            {/if}
+          </tbody>
+        </table>
+      {/if}
     </div>
   {/if}
 
   <!-- Extracted tabs: mount once on first visit, then toggle visibility so
-       their state and fetched data persist across tab switches. -->
+       their state and fetched data persist across tab switches. The four
+       Settings panels keep their own `visited` keys, so opening Settings only
+       mounts (and queries the device for) the sub-tab you're actually on. -->
+  <div id="tabpanel-settings" hidden={activeTab !== "settings"}>
+    <div class="subtabs" role="tablist" aria-label="Settings sections">
+      {#each [
+        { id: "display", label: "Display" },
+        { id: "audio", label: "Audio" },
+        { id: "input", label: "Input" },
+        { id: "system", label: "Device" },
+      ] as s (s.id)}
+        <button
+          role="tab"
+          aria-selected={activeSettingsSub === s.id}
+          aria-controls={`tabpanel-${s.id}`}
+          id={`subtab-${s.id}`}
+          class:active={activeSettingsSub === s.id}
+          onclick={() => (activeSettingsSub = s.id as SettingsSub)}
+        >
+          {s.label}
+        </button>
+      {/each}
+    </div>
+  </div>
+  {#if visited.input}
+    <div hidden={settingsSubActive !== "input"}>
+      <TweaksTab {serial} deviceType={device.device_type} group="input" />
+    </div>
+  {/if}
+  {#if visited.display}
+    <div hidden={settingsSubActive !== "display"}>
+      <DisplayTab {serial} deviceType={device.device_type} />
+      <TweaksTab {serial} deviceType={device.device_type} group="display" />
+      <SystemTab {serial} group="display" />
+
+      <div class="card section-card">
+        <div class="card-header">
+          <h2>Launchers</h2>
+          <button onclick={loadLauncher} disabled={launcherLoading}>
+            {launcherLoading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
+        {#if launcherErr}
+          <div class="error">{launcherErr}</div>
+        {:else}
+          {#if currentLauncher?.package}
+            <p>Currently active: <strong>{currentLauncher.package}</strong></p>
+          {/if}
+          {#if channelDisabled}
+            <div class="warning">
+              ⚠ <code>com.android.providers.tv</code> is disabled on this device. Watch Next / Continue
+              Watching rows from Apple TV, Netflix, Disney+ etc. will be empty until you re-enable it.
+            </div>
+          {/if}
+          {#if launchers.length === 0 && !launcherLoading}
+            <p class="muted">No launchers loaded.</p>
+          {:else}
+            <ul class="launcher-list">
+              {#each launchers as l}
+                {@const isCurrent = currentLauncher?.package === l.entry.package}
+                {@const busy = launcherActionBusy === l.entry.package}
+                <li>
+                  <div>
+                    <div class="launcher-name">
+                      {l.entry.name}
+                      {#if isCurrent}
+                        <span class="tag installed current-default">ACTIVE</span>
+                      {/if}
+                    </div>
+                    <div class="muted small mono launcher-pkg">{l.entry.package}</div>
+                    {#if busy && launcherProgress}
+                      <div class="launcher-progress" role="status" aria-live="polite">
+                        <span class="spinner" aria-hidden="true"></span>{launcherProgress}…
+                      </div>
+                    {/if}
+                  </div>
+                  <div class="row-actions">
+                    <div class="tags">
+                      {#if l.stock}
+                        <span class="tag stock">STOCK</span>
+                      {:else if l.other}
+                        <span class="tag stock">HOME APP</span>
+                      {:else if l.installed}
+                        <span class="tag installed">INSTALLED</span>
+                      {:else}
+                        <span class="tag missing">MISSING</span>
+                      {/if}
+                      {#if l.installed && !l.enabled}
+                        <span class="tag disabled">DISABLED</span>
+                      {/if}
+                    </div>
+                    {#if l.entry.source_url}
+                      <button class="small-action subtle" onclick={() => openUrl(l.entry.source_url!)} aria-label={`Open the developer's page for ${l.entry.name} in your browser`} disabled={launcherActionBusy !== null}>Source page</button>
+                    {/if}
+                    {#if !l.installed}
+                      <button
+                        class="small-action"
+                        onclick={() => installLauncherFromStore(l.entry.package)}
+                        aria-label="Open Play Store on TV"
+                        disabled={launcherActionBusy !== null}
+                        title="Open the Play Store on the device to install {l.entry.name}"
+                      >
+                        {busy ? "Opening…" : "Install"}
+                      </button>
+                    {:else}
+                      {#if !l.enabled}
+                        <button
+                          class="small-action"
+                          onclick={() => enableLauncher(l.entry.package)}
+                          disabled={launcherActionBusy !== null}
+                          title="pm enable {l.entry.package}"
+                        >
+                          {busy ? "Enabling…" : "Enable"}
+                        </button>
+                      {/if}
+                      {#if !isCurrent}
+                        <button
+                          class="primary small-action"
+                          onclick={() => setDefaultLauncher(l.entry.package)}
+                          disabled={launcherActionBusy !== null}
+                          title={l.enabled
+                            ? "Make this the default launcher (role API / set-home-activity)"
+                            : "Enable this launcher, then make it the default"}
+                        >
+                          {busy ? "Setting…" : l.enabled ? "Set as default" : "Enable & set default"}
+                        </button>
+                      {/if}
+                      {#if !isCurrent && l.enabled}
+                        <button
+                          class="small-action subtle"
+                          onclick={() => disableLauncher(l.entry.package)}
+                          disabled={launcherActionBusy !== null}
+                          title="pm disable-user --user 0 {l.entry.package}"
+                        >{busy ? "Disabling…" : "Disable"}</button>
+                      {:else if isCurrent}
+                        <span
+                          class="muted small"
+                          title="Disabling the launcher you're currently using would leave the TV with no Home screen"
+                        >
+                          Set another launcher as default to disable this one
+                        </span>
+                      {/if}
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+            {#if launcherActionMessage}
+              <p class="muted small mono action-message">{launcherActionMessage}</p>
+            {/if}
+            <details class="home-picker" ontoggle={(e) => { if (e.currentTarget.open) void loadHomePicker(); }}>
+              <summary>Advanced: choose any installed app</summary>
+              <label>App to set as Home <select bind:value={homePickerChoice} disabled={launcherActionBusy !== null}>{#each homePickerPackages as app (app.package)}<option value={app.package}>{app.name ?? app.package}</option>{/each}</select></label>
+              <button onclick={setAnyHome} disabled={!homePickerChoice || launcherActionBusy !== null}>Set as Home</button>
+              <button onclick={() => stockConfirmTarget = homePickerChoice} disabled={!homePickerChoice || currentLauncher?.package !== homePickerChoice || launcherActionBusy !== null}>Disable stock launcher</button>
+              {#if homePickerMessage}<p class="muted small">{homePickerMessage}</p>{/if}
+              {#if stockConfirmTarget}
+                <div class="warning" role="alertdialog" aria-label="Confirm disabling the stock launcher">
+                  <p>Disable the stock launcher only after {stockConfirmTarget} holds Home. Save a snapshot first so you can restore the current setup.</p>
+                  <button onclick={saveSnapshot} disabled={saveBusy}>Save snapshot first</button>
+                  <button onclick={disableStockFromPicker} disabled={launcherActionBusy !== null}>Disable stock launcher</button>
+                  <button onclick={() => stockConfirmTarget = null}>Cancel</button>
+                </div>
+              {/if}
+            </details>
+          {/if}
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if visited.audio}
+    <div hidden={settingsSubActive !== "audio"}>
+      <AudioTab {serial} deviceType={device.device_type} />
+    </div>
+  {/if}
+  {#if visited.system}
+    <div hidden={settingsSubActive !== "system"}>
+      <SystemTab {serial} group="device" />
+      <TweaksTab {serial} deviceType={device.device_type} group="device" />
+    </div>
+  {/if}
+  {#if visited.console}
+    <div hidden={activeTab !== "console"}>
+      <ConsoleTab {serial} active={activeTab === "console"} />
+    </div>
+  {/if}
+  {#if visited.media}
+    <div hidden={activeTab !== "media"}><MediaTab {serial} active={activeTab === "media"} resetToken={mediaResetToken} /></div>
+  {/if}
+  {#if activeTab === "logs"}
+    <div hidden={activeTab !== "logs"}><LogsTab {serial} active={activeTab === "logs"} /></div>
+  {/if}
   {#if visited.tweaks}
-    <div hidden={activeTab !== "tweaks"}>
-      <TweaksTab {serial} onSettingsChanged={invalidateDeviceCaches} />
+    <div hidden={activeTab !== "tweaks"}><AdvancedTweaksTab {serial} onSettingsChanged={() => { mediaResetToken++; invalidateDeviceCaches(); }} /></div>
+  {/if}
+  {#if visited.shell}
+    <div hidden={activeTab !== "shell"}>
+      <ShellTab {serial} acknowledged={shellAcknowledged} onacknowledge={(next) => { shellAcknowledged = next; setShellAcknowledged(hardwareId, next); }} onexecuted={() => { mediaResetToken++; invalidateDeviceCaches(); resyncAppStates(); }} />
     </div>
   {/if}
   {#if visited.files}
@@ -3501,35 +2719,12 @@
   {/if}
   {#if visited.sideload}
     <div hidden={activeTab !== "sideload"}>
-      <SideloadTab {serial} deviceLabel={device?.name ?? ""} />
+      <SideloadTab {serial} />
     </div>
   {/if}
   {#if visited.remote}
     <div hidden={activeTab !== "remote"}>
       <RemoteTab {serial} />
-    </div>
-  {/if}
-  {#if visited.media}
-    <div hidden={activeTab !== "media"}>
-      <MediaTab {serial} resetToken={mediaResetToken} active={activeTab === "media"} />
-    </div>
-  {/if}
-  {#if activeTab === "logs"}
-    {#key `${serial}:${pageEpoch}`}
-      <LogsTab {serial} resetToken={pageEpoch} active={activeTab === "logs"} />
-    {/key}
-  {/if}
-  {#if visited.shell}
-    <div hidden={activeTab !== "shell"}>
-      <ShellTab
-        {serial}
-        acknowledged={shellAcknowledged}
-        onacknowledge={(next) => {
-          shellAcknowledged = next;
-          setShellAcknowledged(hardwareId, next);
-        }}
-        onexecuted={shellExecuted}
-      />
     </div>
   {/if}
   {#if visited.optimize}
@@ -3540,17 +2735,31 @@
         {appUsage}
         {appDetails}
         {keptPackages}
+        pageEpoch={0}
         resetToken={optimizeResetToken}
-        {pageEpoch}
-        onRunStarted={optimizeRunStarted}
         onStatesChanged={resyncAppStates}
         onPlanLoaded={loadAppMemory}
+        onRunStarted={optimizeRunStarted}
       />
     </div>
   {/if}
 {/if}
 
 <style>
+  .plan-table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+  .plan-table th, .plan-table td { padding: 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
+  .plan-noop { color: var(--fg-muted); }
+  .reapply-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2, transparent);
+  }
   .back-row {
     margin-bottom: 1rem;
   }
@@ -3570,517 +2779,98 @@
     flex-wrap: wrap;
   }
   .serial {
-    font-family: var(--mono);
+    font-family: ui-monospace, monospace;
     font-size: 0.85rem;
-  }
-  /* Controls that now pair an icon with a label. */
-  /* Scan layer for the Health tab: the three numbers people look for first,
-     duplicated from the Vitals list below rather than moved out of it. The
-     icon carries the threshold colour so the tone is readable before the
-     number is. */
-  /* Overview is two cards, not one: a read-only spec sheet and a destructive
-     action. They were sharing a card, which made the recovery button read as
-     a footnote on the device's build id. */
-  .overview-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  .danger-card {
-    border-color: var(--danger-border);
-    background: linear-gradient(
-      var(--danger-surface),
-      var(--danger-surface)
-    ), var(--bg-surface);
-  }
-  .danger-card h2 :global(.msr) {
-    color: var(--danger-text);
-  }
-  /* Board 11.1: the spec sheet takes the width it needs and recovery sits
-     beside it, so a destructive action is never buried under a scroll of
-     read-only values. */
-  .profile-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 22rem;
-    gap: 1.25rem;
-    align-items: start;
-  }
-  .profile-side {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .side-label {
-    margin: 0 0 0.1rem;
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--fg-muted);
-  }
-  /* Rows rather than a definition list: the values line up in one column and
-     each property reads as its own line. */
-  .prop-table {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-  .prop-row {
-    display: grid;
-    grid-template-columns: 11rem minmax(0, 1fr);
-    gap: 1rem;
-    align-items: baseline;
-    padding: 0.6rem 0.9rem;
-  }
-  .prop-row + .prop-row {
-    border-top: 1px solid var(--border);
-  }
-  .prop-row:nth-child(odd) {
-    background: var(--bg-surface-2);
-  }
-  .prop-label {
-    color: var(--fg-muted);
-    font-size: 0.85rem;
-  }
-  .prop-value {
-    overflow-wrap: anywhere;
-  }
-  .prop-note {
-    margin-top: 0.7rem;
-  }
-  .danger-card {
-    border-color: var(--danger-border);
-    background: linear-gradient(var(--danger-surface), var(--danger-surface)),
-      var(--bg-surface);
-  }
-  .danger-card h2 :global(.msr) {
-    color: var(--danger-text);
-  }
-  .recovery-run {
-    width: 100%;
-    margin-top: 0.9rem;
-  }
-  .recovery-caption {
-    margin: 0.5rem 0 0;
-    text-align: center;
-    font-size: 0.74rem;
-  }
-  /* Neutral note, not a warning: it qualifies the scope of the action above
-     rather than adding a second alarm. */
-  @media (max-width: 1100px) {
-    .profile-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-  /* Five tiles on a fill-first grid rather than three stretched across the
-     full width — that stretch was most of the empty space. The icon sits on
-     the number's line instead of on a row of its own. */
-  /* Marks a row we could not match to an installed package, so a reader can
-     tell "no rule covered this app" apart from "this is not an app". */
-  .unconfirmed {
-    margin-left: 0.45rem;
-    padding: 0.05rem 0.35rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface-2);
-    color: var(--fg-muted);
-    font-family: var(--sans);
-    font-size: 0.68rem;
-    white-space: nowrap;
-  }
-  /* Hairline between tab groups — twelve tabs at this width have no room for
-     captions, so the rule does the grouping. */
-  /* Only on hover: an undo does not need to advertise itself on every
-     decided row. */
-  .change-keep {
-    opacity: 0;
-  }
-  tr:hover .change-keep,
-  .change-keep:focus-visible {
-    opacity: 1;
-  }
-  .tabs button.far {
-    margin-left: auto;
-  }
-  .health-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  /* Memory takes the wide column, inverting the board: its Process cells carry
-     forty-to-seventy-character package ids, which wrap on every row in a
-     narrow rail. */
-  .health-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-    gap: 1.25rem;
-    align-items: start;
-  }
-  .health-col {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    min-width: 0;
-  }
-  .health-memory {
-    min-width: 0;
-  }
-  .av-grid {
-    display: grid;
-    grid-template-columns: 1fr 1px 1fr;
-    gap: 1rem;
-    align-items: start;
-  }
-  .av-block {
-    min-width: 0;
-  }
-  .av-block h3 {
-    margin-top: 0;
-  }
-  .av-rule {
-    align-self: stretch;
-    background: var(--border);
-  }
-  .av-primary {
-    font-family: var(--mono);
-    font-size: 1.3rem;
-    font-weight: 600;
-    line-height: 1.15;
-  }
-  .av-audio {
-    font-size: 1rem;
-    font-weight: 500;
-    overflow-wrap: anywhere;
-  }
-  .av-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.45rem;
-  }
-  /* Facts about the panel, not verdicts — no status colour. */
-  .av-chip {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    padding: 0.1rem 0.45rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface-2);
-    color: var(--fg-secondary);
-    white-space: nowrap;
-  }
-  /* Board 11.2's header: a status pill that states whether the numbers are
-     moving, then the control that changes it. The pill is never lime — it
-     reports, it does not invite a press. */
-  .health-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-    margin-bottom: 1rem;
-  }
-  .live-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.25rem 0.7rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    color: var(--fg-muted);
-  }
-  .live-pill.on {
-    border-color: color-mix(in srgb, var(--ok) 35%, transparent);
-    color: var(--ok);
-  }
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-  /* Five cards, each stating what its figure is measured against. */
-  /* No min-height: a card with no bar (Swap, which reports a figure and
-     nothing to scale it against) was padded out to match the ones that have
-     one, which is where most of the empty space came from. */
-  .stat-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    padding: 0.75rem 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--bg-surface-2);
-    min-width: 0;
-  }
-  .stat-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.6rem;
-  }
-  .stat-title {
-    font-weight: 600;
-  }
-  /* The used/total caption on RAM and Storage. It sits beside the card title
-     rather than under it, so at 0.78rem muted it read as a footnote on the one
-     card whose whole point is the pair of numbers. */
-  .stat-figure {
-    font-size: 0.9rem;
-    color: var(--fg-secondary);
-    white-space: nowrap;
-  }
-  .stat-big {
-    font-size: 1.6rem;
-    font-weight: 600;
-    line-height: 1;
-  }
-  /* The figure carries the tone, not a separate badge: it is the thing being
-     read, and a number that is fine looks exactly like one that is not until
-     it is coloured. */
-  .stat-big.warn {
-    color: var(--warn);
-  }
-  .stat-big.danger {
-    color: var(--danger);
-  }
-  /* The global tooltip is one nowrap line, which is right for "Copy" and wrong
-     for a sentence. These two are sentences: they say what the number means,
-     which is the whole reason they are there. */
-  /* Visually hidden, still announced — the caret column has no visible head. */
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .tip-wrap {
-    text-decoration: underline dotted;
-    text-underline-offset: 0.2em;
-    cursor: help;
-  }
-  .tip-wrap::after {
-    white-space: normal;
-    width: 15rem;
-    line-height: 1.4;
-    text-align: left;
-  }
-  .stat-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.6rem;
-    margin-top: auto;
-    font-size: 0.72rem;
-    color: var(--fg-muted);
-  }
-  .net-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-  }
-  .net-table th {
-    padding: 0.4rem 0.2rem;
-    border-bottom: 1px solid var(--border);
-    color: var(--fg-muted);
-    font-weight: 500;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    text-align: left;
-  }
-  .net-table td {
-    padding: 0.45rem 0.2rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .net-table tr:last-child td {
-    border-bottom: none;
-  }
-  .net-table th.right,
-  .net-table td.right {
-    text-align: right;
-  }
-  .trim-note {
-    margin: 0.3rem 0 0;
-  }
-  /* An outlier package id must never widen the table. */
-  .mem-table .pkg {
-    max-width: 0;
-    overflow-wrap: anywhere;
-  }
-  /* Memory and Suggestion shrink to their content so the package id gets the
-     rest; otherwise the spare width went to the pills and the id broke mid-word. */
-  .mem-table td.num,
-  .mem-table td.suggestion-cell,
-  .mem-table th:first-child,
-  .mem-table th:last-child {
-    width: 1%;
-    white-space: nowrap;
-  }
-  .mem-table tr.mem-row-link {
-    cursor: pointer;
-  }
-  .mem-table tr.mem-row-link:hover {
-    background: color-mix(in srgb, var(--fg-primary) 4%, transparent);
-  }
-  .mem-open {
-    padding: 0;
-    border: none;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    overflow-wrap: anywhere;
-    cursor: pointer;
-  }
-  .mem-pid {
-    margin-left: 0.45rem;
-    color: var(--fg-muted);
-    font-size: 0.75rem;
-    white-space: nowrap;
-  }
-  .mem-open:hover {
-    background: none;
-    color: var(--accent);
-    text-decoration: underline;
-  }
-  /* The App List's recommendation, as words rather than a verdict chip: it is
-     advice about an action, and the verdict chip vocabulary is reserved for
-     how safe that action is. Amber is "look at this first", as it is on a
-     review row; everything that needs nothing recedes. */
-  .suggestion {
-    display: inline-block;
-    padding: 0.1rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    font-size: 0.75rem;
-    white-space: nowrap;
-    color: var(--fg-secondary);
-  }
-  .suggestion--act {
-    color: var(--fg-primary);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .suggestion--review,
-  .suggestion--unavailable {
-    color: var(--warn);
-    background: var(--warn-surface);
-    border-color: var(--warn-border);
-  }
-  .suggestion--done,
-  .suggestion--keep,
-  .suggestion--restore {
-    color: var(--fg-muted);
-  }
-  @media (max-width: 1100px) {
-    .health-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-  /* Five across, as the board has them, collapsing rather than reflowing into
-     an orphan. They sit straight on the page: wrapping them in a card put a
-     border around five bordered things. */
-  /* Fit as many as the width allows rather than dropping to a fixed three and
-     orphaning the fifth on a row of its own. */
-  .stat-tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-    gap: 0.6rem;
-    margin: 0;
-    align-items: stretch;
-  }
-  .stat-pending {
-    color: var(--fg-muted);
-  }
-  .stat-icon.danger {
-    color: var(--danger-text);
-  }
-  .stat-unit {
-    margin-left: 0.15rem;
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: var(--fg-muted);
-  }
-  .back-btn,
-  .reboot-btn,
-  .done {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
   }
   .tabs {
     display: flex;
-    /* Stretch, not centre: every tab takes the tallest tab's height, so the
-       active underline stays on one line even when a tab carries a tag. */
-    align-items: stretch;
-    gap: 0.4rem;
+    /* One single row at any window size: labels never wrap, gap and per-tab
+       padding/font scale down with the viewport, and below the point where
+       even the compact sizing can't fit, the bar scrolls horizontally rather
+       than spilling into a second row. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    gap: clamp(0.1rem, 0.35vw, 0.4rem);
     margin-bottom: 1rem;
     border-bottom: 1px solid var(--border);
     padding-bottom: 0;
-    /* Thirteen tabs do not always fit. Scrolling the strip is the honest
-       failure: wrapping "Install APK" onto two lines makes one tab twice the
-       height of its neighbours and shoves the underline off the baseline. */
-    overflow-x: auto;
-    scrollbar-width: thin;
   }
   .tabs button {
-    flex: none;
-    white-space: nowrap;
     border: none;
     border-bottom: 2px solid transparent;
     border-radius: 0;
     background: transparent;
-    padding: 0.5rem 0.7rem;
+    padding: 0.5rem clamp(0.3rem, 0.85vw, 0.8rem);
+    font-size: clamp(0.74rem, 1vw, 0.9rem);
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
   .tabs button.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
   }
-  /* Usage meters, lifted from the mobile Diagnostics screen: a number alone
-     makes you do the arithmetic, a bar tells you at a glance. Desktop tokens
-     rather than mobile's, so it matches the rest of this app. */
-  .meter-value {
+  /* Settings sub-tabs. Pills rather than a second underlined bar, so there's no
+     ambiguity about which row is the primary navigation. */
+  .subtabs {
     display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+  }
+  .subtabs button {
+    padding: 0.3rem 0.9rem;
+    font-size: 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-secondary);
+    white-space: nowrap;
+  }
+  .subtabs button.active {
+    background: var(--accent-glow);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem;
+  }
+  /* A former tab now living as a second card inside another tab. */
+  .section-card {
+    margin-top: 1rem;
+  }
+  .card h2 {
+    margin: 0 0 0.8rem;
+    font-size: 1.1rem;
+  }
+  .card h3 {
+    margin: 1rem 0 0.4rem;
+    font-size: 1rem;
+    color: var(--fg-secondary);
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    align-items: baseline;
-    max-width: 22rem;
   }
-  .meter {
-    max-width: 22rem;
-    margin-top: 0.3rem;
-    height: 6px;
-    border-radius: var(--radius-xs);
-    background: var(--bg-inset);
-    overflow: hidden;
+  .kv {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.4rem 1.5rem;
+    margin: 0;
+    font-size: 0.9rem;
   }
-  .meter-fill {
-    height: 100%;
-    border-radius: var(--radius-xs);
-    transition: width 0.3s ease;
-  }
-  /* Solid, not a gradient. In dark --accent and --accent-strong are the same
-     lime so the gradient was already flat; in light they are dark olive and
-     lime, which made one bar look like two different states. --accent is the
-     readable one against the track in both themes. */
-  .meter-fill.ok {
-    background: var(--accent);
-  }
-  .meter-fill.warn {
-    background: var(--warn);
-  }
-  .meter-fill.danger {
-    background: var(--danger);
-  }
-  .net-name {
+  .kv dt {
     color: var(--fg-muted);
   }
-
+  .kv dd {
+    margin: 0;
+    font-family: ui-monospace, monospace;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -4089,126 +2879,22 @@
   th, td {
     text-align: left;
     padding: 0.5rem 0.6rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--bg-button);
     vertical-align: middle;
-  }
-  th.right {
-    text-align: right;
-    /* "Last used" is two words over a one-line column of values. */
-    white-space: nowrap;
   }
   th.center, td.center {
     text-align: center;
   }
-  /* Everything right of this line does something; everything left of it tells
-     you something. One rule down the whole table rather than a tinted column,
-     which becomes a stripe over three hundred rows. */
-  .app-table .controls-start {
-    border-left: 1px solid var(--border);
-    padding-left: 1rem;
-  }
-  /* Carries the eye from the app name across to its controls — the columns are
-     far apart on a 1280px window. */
-  .app-table tbody tr:hover td {
-    background: var(--bg-inset);
-  }
-  /* One Actions column, per board 11.5: the decision, a hairline, then the
-     tools. The hairline is what separates "change this app" from "do something
-     with this app" without spending a whole column heading on it.
-
-     The flex goes on the inner div and NEVER on the <td>. A flex table cell
-     drops out of table layout and sizes to its own content, so its
-     border-bottom landed a dozen pixels above the other cells' — one row
-     divider drawn at two different heights. */
-  .app-table .actions-cell {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    justify-content: space-between;
-  }
-  /* Labels and verbs in the action cell are single-line things. Wrapped, they
-     made every row a different height and "Remove if unused" stacked into a
-     three-line block. */
-  .app-table .actions-cell button,
-  .app-table .row-verbs > .muted,
-  .app-table .row-verbs > .done {
+  .app-table .rec-cell,
+  .app-table .tools-cell {
+    /* Keep the action/tool buttons from being squeezed once the name column
+       can shrink — they stay on one line at their natural width. */
     white-space: nowrap;
+    width: 1%;
   }
-  .app-table .row-verbs {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex: 1;
-    min-width: 0;
-  }
-  /* Three fixed slots, so an icon is in the same place on every row and the
-     column can be read straight down. A row without a Play Store link leaves
-     that slot empty instead of sliding the other two across. */
-  .app-table .row-tools {
-    display: grid;
-    grid-template-columns: repeat(3, 2rem);
-    justify-items: center;
-    align-items: center;
-    flex: none;
-  }
-  .tool-slot-empty {
-    display: block;
-    width: 2rem;
-  }
-  /* The verb buttons keep their own spacing rule; inside a flex row the old
-     margin-right would double up with the gap. */
-  .app-table .actions-cell .small-action {
-    margin-right: 0;
-  }
-  .app-table .actions-cell .done {
-    margin-right: 0;
-  }
-  .tool-sep {
-    align-self: stretch;
-    width: 1px;
-    margin: 0.15rem 0.3rem;
-    background: var(--border);
-  }
-  /* Icon-only, because the three words cost more width than the package ids
-     they were squeezing out. Every one keeps its title and aria-label, and the
-     legend under the table spells them out. */
-  .tool-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.3rem;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--fg-muted);
-    cursor: pointer;
-  }
-  .tool-btn:hover:not(:disabled) {
-    border-color: var(--border);
-    background: var(--bg-button-hover);
-    color: var(--fg-primary);
-  }
-  .tool-legend {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 0.5rem;
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    color: var(--fg-muted);
-  }
-  .tool-legend span {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-  }
-  .app-table .rec-cell .small-action {
-    margin-right: 0.3rem;
-  }
-  .app-table .rec-cell .done {
-    display: inline-block;
-    margin-right: 0.5rem;
+  .app-table .rec-cell {
+    /* Keep button + subtle override on one row when possible. */
+    white-space: nowrap;
   }
   th {
     color: var(--fg-muted);
@@ -4217,394 +2903,115 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
-  td.num {
-    font-family: var(--mono);
+  /* The cue columns size to their content ("—", a short badge), which is
+     narrower than their two-word headers — let the header set the width
+     instead of wrapping onto a second line. */
+  .app-table th {
+    white-space: nowrap;
+  }
+  td.num,
+  th.num {
+    /* Numbers (and their header) right-align so magnitudes compare by eye. */
     text-align: right;
+  }
+  td.num {
+    font-family: ui-monospace, monospace;
     width: 100px;
   }
   td.num.warn { color: var(--danger-strong); }
   td.num.caution { color: var(--warn); }
   td.pkg {
-    font-family: var(--mono);
+    font-family: ui-monospace, monospace;
     font-size: 0.85rem;
+  }
+  /* Risk pills bring their own hovercard (RiskBadge component); the cell just
+     needs to stay overflow-visible so the card isn't clipped by the table. */
+  td.risk-cell {
+    overflow: visible;
+    white-space: nowrap;
+  }
+  /* Uniform action clusters. One flex group per cell keeps buttons on a tidy
+     grid instead of ragged inline wrapping — right-aligned for trailing action
+     columns, `start` for mid-table ones. */
+  .tool-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+    justify-content: flex-end;
   }
   .small {
     font-size: 0.82rem;
   }
   .mono {
-    font-family: var(--mono);
-  }
-  /* Three columns, as board 11.4 has it: who, what state, what you can do.
-     The state tags were sharing a flex row with the buttons, so a row with
-     three tags pushed its own actions off the edge. */
-  .launcher-head,
-  .launcher-list li {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 20rem);
-    align-items: center;
-    gap: 1rem;
-  }
-  .launcher-head {
-    padding: 0 0.6rem 0.5rem;
-    border-bottom: 1px solid var(--border);
-    color: var(--fg-muted);
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .launcher-head .right {
-    text-align: right;
+    font-family: ui-monospace, monospace;
   }
   .launcher-list {
     list-style: none;
     padding: 0;
-    margin: 0;
+    margin: 0.5rem 0 0;
   }
   .launcher-list li {
-    padding: 0.7rem 0.6rem;
-    border-bottom: 1px solid var(--border);
-  }
-  /* The row you are actually running gets the tint; everything else recedes. */
-  .launcher-list li.is-current {
-    background: var(--accent-surface);
-  }
-  .launcher-list li.is-current .launcher-icon {
-    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    color: var(--accent);
-  }
-  .launcher-ident {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 0.75rem;
-    min-width: 0;
-  }
-  .launcher-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: 2.4rem;
-    height: 2.4rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-inset);
-    color: var(--fg-muted);
-  }
-  .launcher-text {
-    min-width: 0;
-  }
-  .launcher-pkg {
-    overflow-wrap: anywhere;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid var(--bg-button);
   }
   .launcher-name {
-    font-weight: 600;
-  }
-  .launcher-callout {
-    margin-top: 1rem;
-  }
-  /* One reference panel: what the TV actually resolved. The tag legend that
-     used to sit beside it explained the badges to someone already reading
-     them — the badges say it themselves. */
-  .launcher-foot {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-  .launcher-store-callout {
-    margin-top: 1rem;
-    align-items: center;
-  }
-  .home-picker {
-    margin-top: 1rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-  }
-  .home-picker summary {
-    padding: 0.7rem 0.9rem;
-    cursor: pointer;
-    font-size: 0.85rem;
-    color: var(--fg-secondary);
-  }
-  .home-picker-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 0 0.9rem 0.9rem;
-  }
-  .home-picker-body > p {
-    margin: 0;
-  }
-  .home-picker-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 0.6rem;
-  }
-  .home-picker-field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    flex: 1 1 18rem;
-    min-width: 0;
-  }
-  .home-picker-field select {
-    width: 100%;
-  }
-  /* One height for the select, the input and both buttons: the row aligns
-     bottoms, so a taller select lifted its label off the Activity label and the
-     short buttons sat below the fields' centre line. */
-  .home-picker-field select,
-  .home-picker-field input,
-  .home-picker-row > button {
-    box-sizing: border-box;
-    height: 2.25rem;
-  }
-  .home-picker-activity {
-    flex: 0 1 11rem;
-  }
-  .home-picker-confirm {
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .home-picker-confirm > span:not(.home-picker-confirm-actions) {
-    flex: 1 1 20rem;
-  }
-  .home-picker-confirm-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .home-picker-result {
-    margin: 0;
-    color: var(--fg-secondary);
-  }
-  .home-picker-result.ok {
-    color: var(--ok);
-  }
-  /* Keeps the Get link on the row rather than below it when the actions wrap. */
-  .launcher-get {
-    white-space: nowrap;
-  }
-  /* The subtitle carries a second thought now, so it wraps onto its own line
-     on a narrow window instead of pushing the Refresh button off the card. */
-  .launcher-sub {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.15rem 0.6rem;
-  }
-  .foot-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    padding: 0.8rem 1rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--bg-inset);
-    min-width: 0;
-  }
-  .foot-label {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-  }
-  .foot-value {
-    font-size: 0.85rem;
-    overflow-wrap: anywhere;
-  }
-  .current-default {
-    padding: 0.3rem 0.7rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-inset);
-    color: var(--fg-muted);
-    font-size: 0.8rem;
-    white-space: nowrap;
-    cursor: default;
+    font-weight: 500;
   }
   .tags {
     display: flex;
-    flex-wrap: wrap;
     gap: 0.4rem;
   }
   .tag {
     font-size: 0.7rem;
     padding: 0.15rem 0.5rem;
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
     letter-spacing: 0.04em;
   }
   .tag.installed { background: var(--ok-surface); color: var(--ok); }
-  .tag.review { background: var(--warn-surface-2); color: var(--warn); }
   .tag.stock { background: var(--bg-muted); color: var(--accent); }
   .tag.missing { background: var(--bg-muted); color: var(--fg-faint); }
   .tag.disabled { background: var(--warn-surface-2); color: var(--warn); }
-  .beta-tag {
-    margin-left: 0.35rem;
-    padding: 0.05rem 0.35rem;
-    border-radius: var(--radius-sm);
-    background: var(--warn-surface-2);
-    color: var(--warn);
-    font-size: 0.62rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    vertical-align: middle;
-  }
   .warning {
     background: var(--warn-surface);
     border: 1px solid var(--warn-border);
     color: var(--warn);
     padding: 0.7rem 1rem;
-    border-radius: var(--radius-md);
+    border-radius: 6px;
     margin: 0.8rem 0;
     font-size: 0.9rem;
   }
   .warning code {
     background: var(--bg-inset);
     padding: 0.1rem 0.3rem;
-    border-radius: var(--radius-xs);
+    border-radius: 3px;
   }
   .error {
     background: var(--danger-surface);
     color: var(--danger-text);
     padding: 0.7rem 1rem;
-    border-radius: var(--radius-md);
-    font-family: var(--mono);
+    border-radius: 6px;
+    font-family: ui-monospace, monospace;
     font-size: 0.85rem;
-  }
-  /* What you have on the left, what applying it would do on the right —
-     board 11.10. The plan used to sit under the list, so choosing a snapshot
-     scrolled the thing you were choosing out of view. */
-  .snap-explainer {
-    margin: 0.25rem 0 0;
-    max-width: 44rem;
-    line-height: 1.5;
-  }
-  .snap-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-    gap: 1.5rem;
-    align-items: start;
-    margin-top: 1rem;
-  }
-  .snap-col {
-    min-width: 0;
   }
   .snap-list {
     list-style: none;
     padding: 0;
-    margin: 0;
+    margin: 0.6rem 0 0;
   }
   .snap-list li {
     display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
     padding: 0.7rem 1rem;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: 6px;
     margin-bottom: 0.5rem;
-  }
-  /* The one you are previewing, tinted — the plan on the right belongs to it. */
-  .snap-list li.is-selected {
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    background: var(--accent-surface);
-  }
-  .snap-list li.is-selected .snap-icon {
-    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    color: var(--accent);
-  }
-  .snap-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: 2.4rem;
-    height: 2.4rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-inset);
-    color: var(--fg-muted);
-  }
-  .snap-contents {
-    margin-top: 1rem;
-  }
-  .snap-contents-list {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.35rem 1rem;
-    margin: 0;
-  }
-  .snap-contents-list dt {
-    color: var(--fg-secondary);
-  }
-  .snap-contents-list dd {
-    margin: 0;
-    text-align: right;
-  }
-  /* Row per item: what it is now, what this snapshot makes it. */
-  .plan-box {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--bg-inset);
-    overflow: hidden;
-  }
-  .plan-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-  }
-  .plan-table th {
-    padding: 0.5rem 0.9rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .plan-table td {
-    padding: 0.45rem 0.9rem;
-    border-bottom: 1px solid var(--border);
-    overflow-wrap: anywhere;
-  }
-  .plan-table tr:last-child td {
-    border-bottom: none;
-  }
-  .plan-now,
-  .plan-next {
-    width: 1%;
-    white-space: nowrap;
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-  }
-  /* A package id in the Home app row would otherwise stretch both value
-     columns to its full width and squeeze every item id into a sliver. */
-  .plan-table tr[data-plan-item="launcher"] .plan-now,
-  .plan-table tr[data-plan-item="launcher"] .plan-next {
-    white-space: normal;
-    min-width: 9rem;
-  }
-  .plan-next.change {
-    color: var(--ok);
-  }
-  /* A no-op is still information, so it stays on the list — just quieter. */
-  .plan-noop td {
-    color: var(--fg-muted);
-  }
-  .plan-totals {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-  .plan-total {
-    font-size: 1.3rem;
-    font-weight: 600;
-  }
-  .apply-btn {
-    width: 100%;
-    justify-content: center;
-    padding-block: 0.7rem;
   }
   .snap-main { flex: 1; min-width: 0; }
   .snap-title {
@@ -4614,48 +3021,17 @@
     flex-wrap: wrap;
     margin-bottom: 0.2rem;
   }
-  .snap-actions {
-    display: inline-flex;
-    gap: 0.4rem;
-    align-items: center;
-    flex-shrink: 0;
-    margin-left: auto;
-  }
-  .snap-meta {
-    overflow-wrap: anywhere;
-  }
-  .plan-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 3rem 1.5rem;
-    border: 1px dashed var(--border);
-    border-radius: var(--radius-lg);
-    text-align: center;
-    color: var(--fg-muted);
-  }
-  .plan-empty strong {
-    color: var(--fg-secondary);
-  }
-  @media (max-width: 1100px) {
-    .snap-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
+  .snap-actions { display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0; }
   .preview-box {
     margin-top: 1rem;
     padding: 1rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 6px;
   }
   .preview-box ul {
     margin: 0.4rem 0;
     padding-left: 1.2rem;
-  }
-  .preview-disclaimer {
-    margin-top: 0 !important;
   }
   .header-actions {
     display: flex;
@@ -4676,23 +3052,6 @@
     align-items: center;
     flex-wrap: wrap;
   }
-  /* Right-aligned under an "Action" heading that is itself right-aligned. */
-  .launcher-list .row-actions {
-    justify-content: flex-end;
-  }
-  /* Title over a mono subtitle, as every board 11.x header has it. */
-  .header-title {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-  }
-  .header-title h2 {
-    margin: 0;
-  }
-  .header-sub {
-    margin: 0;
-  }
   .small-action {
     padding: 0.2rem 0.6rem;
     font-size: 0.78rem;
@@ -4709,7 +3068,7 @@
   }
   .small-action.recommended {
     background: var(--accent-strong);
-    color: var(--accent-ink);
+    color: #fff;
     border-color: var(--accent);
     font-weight: 500;
   }
@@ -4734,6 +3093,13 @@
     border-color: var(--danger-strong);
     color: var(--danger-strong);
   }
+  /* Icon-only action: square it up so the glyph sits centered rather than
+     inheriting the text button's wider horizontal padding. */
+  .small-action.icon-action {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.9rem;
+    line-height: 1.1;
+  }
   .small-action.subtle {
     background: transparent;
     border-color: var(--border);
@@ -4743,22 +3109,62 @@
     background: var(--bg-button);
     color: var(--fg-secondary);
   }
+  /* Green counterpart to `recommended danger`: a bring-it-back suggestion. */
+  .small-action.rec-enable {
+    background: var(--ok-surface);
+    border-color: var(--ok);
+    color: var(--ok);
+    font-weight: 500;
+  }
+  .small-action.rec-enable:hover:not(:disabled) {
+    background: var(--ok);
+    color: #fff;
+  }
+  .done-check {
+    font-size: 0.9rem;
+    cursor: default;
+  }
+  .menu-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .actions-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.3rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 8rem;
+    z-index: 60;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+    text-align: left;
+  }
+  .actions-menu button {
+    text-align: left;
+    background: transparent;
+    border: none;
+    font-size: 0.82rem;
+    padding: 0.35rem 0.6rem;
+  }
+  .actions-menu button:hover {
+    background: var(--bg-button);
+  }
+  .actions-menu button.danger {
+    color: var(--danger-strong);
+  }
   .action-message {
     margin-top: 0.4rem;
     padding: 0.4rem 0.6rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
     word-break: break-word;
-  }
-  .link-button {
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: var(--accent);
-    text-decoration: underline;
-    cursor: pointer;
   }
   .launcher-progress {
     display: flex;
@@ -4808,21 +3214,16 @@
   .dismiss:hover {
     color: var(--fg-primary);
   }
-  /* The meta line sits below this row rather than inside its left column, so
-     the title and the actions are the only two things in it and can simply be
-     centred on each other. Previously the actions top-aligned against the
-     title-plus-meta block and read a few pixels low. */
   .device-title-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
   }
   .device-header-actions {
     display: flex;
     gap: 0.5rem;
-    align-items: center;
-    flex-shrink: 0;
+    align-items: flex-start;
   }
   .reboot-wrap {
     position: relative;
@@ -4834,7 +3235,7 @@
     margin-top: 0.3rem;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 6px;
     padding: 0.3rem;
     display: flex;
     flex-direction: column;
@@ -4869,7 +3270,7 @@
     padding: 0.6rem 0.8rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
   }
   .recovery-result ul {
     margin: 0.4rem 0 0;
@@ -4887,7 +3288,7 @@
     padding: 0.6rem 0.8rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
   }
   .apply-result ul {
     margin: 0.3rem 0 0;
@@ -4895,6 +3296,11 @@
   }
   .warn-text {
     color: var(--warn);
+  }
+  button.recording {
+    background: var(--danger-surface);
+    color: var(--danger-text);
+    border-color: var(--danger-text);
   }
   .screenshot-preview {
     margin-top: 0.8rem;
@@ -4905,7 +3311,7 @@
   .screenshot-preview img {
     max-width: 480px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 6px;
   }
   .screenshot-meta {
     display: flex;
@@ -4922,11 +3328,13 @@
     padding: 0.5rem 0.8rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
     font-size: 0.9rem;
   }
   .tools-cell {
     white-space: nowrap;
+    /* The Actions dropdown hangs below the row; don't clip it. */
+    overflow: visible;
   }
   .rename-row {
     display: flex;
@@ -4961,38 +3369,166 @@
     font-size: 0.9rem;
     white-space: nowrap;
   }
-  .other-apps {
-    margin-top: 1.6rem;
-    padding-top: 1.2rem;
-    border-top: 1px solid var(--border);
+  /* Kind filter — three toggles over one table. Off reads as an outline, on as
+     a filled pill, so which slice you're looking at is legible at a glance. */
+  .kind-chips {
+    display: flex;
+    gap: 0.35rem;
   }
-  .type-cell { white-space: nowrap; }
-  .checkbox-row {
+  .chip {
+    padding: 0.25rem 0.7rem;
+    font-size: 0.82rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-secondary);
+    white-space: nowrap;
+  }
+  .chip.on {
+    background: var(--accent-glow);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .chip-count {
+    opacity: 0.65;
+    font-size: 0.76rem;
+    margin-left: 0.15rem;
+  }
+  .legend {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.4rem;
-    font-size: 0.85rem;
-    color: var(--fg-secondary);
-    cursor: pointer;
-  }
-
-  .install-output {
+    margin: 0 0 0.8rem;
+    padding: 0.5rem 0.8rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.7rem 1rem;
-    margin: 0.8rem 0;
-    font-family: var(--mono);
-    font-size: 0.82rem;
-    white-space: pre-wrap;
-    word-break: break-word;
+    border-radius: 4px;
+    line-height: 1.4;
   }
   code {
     background: var(--bg-inset);
     border: 1px solid var(--border);
     padding: 0.1rem 0.4rem;
-    border-radius: var(--radius-sm);
-    font-family: var(--mono);
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
     font-size: 0.85em;
+  }
+  .disk-bar {
+    display: flex;
+    width: 100%;
+    height: 14px;
+    margin: 0.2rem 0 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+    background: var(--bg-inset);
+  }
+  .disk-seg {
+    height: 100%;
+    min-width: 2px;
+  }
+  .disk-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 1rem;
+    margin: 0 0 1rem;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+  }
+  .disk-legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex: none;
+  }
+  .swatch.free {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+  }
+  .storage-table .pkg {
+    line-height: 1.3;
+  }
+  .files-header {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-top: 1.2rem;
+  }
+  .files-header h3 {
+    margin: 0;
+  }
+  .crumbs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0.6rem 0;
+    font-size: 0.9rem;
+  }
+  .crumb-sep {
+    color: var(--fg-muted);
+  }
+  .crumb.current {
+    color: var(--fg-secondary);
+  }
+  .crumb.link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+  }
+  .crumb.link:hover {
+    text-decoration: underline;
+  }
+  .usage-list {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+  }
+  .usage-list li {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  /* The bar sits behind the row rather than beside it: the share of the folder
+     is context for the name, not a column of its own. */
+  .usage-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: var(--bg-inset);
+    z-index: 0;
+  }
+  .usage-name,
+  .usage-size,
+  .usage-list li button {
+    position: relative;
+    z-index: 1;
+  }
+  .usage-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .usage-size {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-secondary);
   }
 </style>

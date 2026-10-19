@@ -40,7 +40,8 @@ function setHarnessEnvironment() {
 }
 
 async function launcherTab(page) {
-  await page.getByRole("tab", { name: "Launcher" }).click();
+  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await page.locator("#subtab-display").click();
   const rows = page.locator(".launcher-list li");
   await rows.first().waitFor({ timeout: 15000 });
 
@@ -100,7 +101,7 @@ async function launcherTab(page) {
 }
 
 async function snapshotTab(page) {
-  await page.getByRole("tab", { name: /Snapshot/ }).click();
+  await page.getByRole("tab", { name: "Overview", exact: true }).click();
   assert.ok(await page.locator("#tabpanel-snapshot .beta-tag").isVisible(), "Snapshots are marked Beta");
 
   // The newest demo snapshot recorded the launcher that is Home right now.

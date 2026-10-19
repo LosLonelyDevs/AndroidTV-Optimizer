@@ -6,19 +6,26 @@
 //! through the ADB driver.
 
 pub mod app_lists;
+pub mod audio;
 pub mod detection;
 pub mod diagnostics;
+pub mod kodi;
 pub mod launcher;
 pub mod logcat;
 pub mod media;
 pub mod optimize;
+pub mod release_assets;
 pub mod safety;
 pub mod snapshot;
 pub mod types;
 
 pub use app_lists::{AppList, AppListBundle};
+pub use audio::{
+    build_enabled_formats_csv, parse_enabled_formats_csv, SurroundFormat, SURROUND_FORMATS,
+};
 pub use detection::{detect_device_type, tv_evidence, DeviceType, TvEvidence};
 pub use diagnostics::{format_diagnostics, DeviceDiagnostics, DiagnosticsInput};
+pub use kodi::{render_advancedsettings, AdjustRefreshRate, KodiProfile};
 pub use launcher::{
     is_last_enabled_home_handler, is_valid_package_name, launcher_rows, paired_transient_holders,
     pick_current_home, HomeReading, LauncherCatalog, LauncherEntry, LauncherStatus,
@@ -28,6 +35,7 @@ pub use media::{
     Decoder, DisplayModeEntry, MediaCapabilities, SurroundMode, Verdict, VerdictLevel, VideoFormat,
 };
 pub use optimize::{compute_plan, OptimizeInputs, OptimizePlan};
+pub use release_assets::{select_asset, ReleaseAsset};
 pub use safety::{
     classify as classify_safety, classify_with_catalog, is_never_disable, shell_command_blocked,
     CatalogVerdict, Safety, SafetySource,

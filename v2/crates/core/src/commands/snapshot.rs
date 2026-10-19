@@ -743,6 +743,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn settings_capture_preserves_manual_surround_formats() {
+        let mock = MockAdb::default().on_shell(
+            "settings get",
+            &batched(&[
+                "0.5", "0.5", "0.5", "1", "null", "0", "1", "2", "400", "3", "5,6", "null", "null",
+            ]),
+        );
+        let map = current_settings_map(&mock, "serial").await.unwrap();
+        assert_eq!(
+            map.get("global.encoded_surround_output")
+                .map(String::as_str),
+            Some("3")
+        );
+        assert_eq!(
+            map.get("global.encoded_surround_output_enabled_formats")
+                .map(String::as_str),
+            Some("5,6")
+        );
+    }
+
+    #[tokio::test]
     async fn settings_capture_rejects_failed_and_truncated_reads() {
         let complete = batched(&vec!["null"; super::tracked_setting_keys().len()]);
         let status = crate::adb::batch::BATCH_STATUS;

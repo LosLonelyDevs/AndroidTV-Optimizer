@@ -1,106 +1,87 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import Icon from "$lib/components/Icon.svelte";
+  import { onMount } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "$lib/api";
-  import sideloadCatalog from "$lib/sideload-catalog.json";
-  import type { ApkInspection, DiscoveredApk } from "$lib/types";
+  import type { DiscoveredApk, InstalledVersion, QuickAppRow, ShizukuStatus } from "$lib/types";
 
-  let { serial, deviceLabel = "" }: { serial: string; deviceLabel?: string } = $props();
+  let { serial }: { serial: string } = $props();
+
+  type InstallOutcome = {
+    ok: boolean;
+    message: string;
+    hint: string | null;
+    /// Set when Android refused the downgrade even with `-d`: the package the
+    /// user would have to remove to force the older APK on. null when there's
+    /// no package id to act on, in which case no fallback is offered.
+    blockedPackage: string | null;
+  };
 
   /// Path of the APK currently installing (null when idle) — per-path so a
   /// multi-APK list only shows the spinner on the row actually installing.
   let sideloadBusy = $state<string | null>(null);
-  let sideloadResult = $state<string>("");
-  let sideloadHint = $state<string | null>(null);
-  /// Path the current install result belongs to (so it renders under that
-  /// row), whether it succeeded, and the raw adb output for the details line.
-  let sideloadResultPath = $state<string | null>(null);
-  let sideloadOk = $state(false);
-  // A remembered folder is only a string from a previous explicit selection.
-  // Keep it separate from the folder backing the currently displayed results
-  // so mounting this tab never probes a stale or removable-volume path.
-  let savedFolder = $state<string | null>(null);
+  /// Install outcome per APK path. Keyed rather than single-valued so an
+  /// Install-all run leaves every row's result on screen, not just the last.
+  let installResults = $state<Record<string, InstallOutcome>>({});
+  /// Path of the most recent install, so a file picked outside the currently
+  /// listed folder still gets its result rendered (below the list).
+  let lastInstalledPath = $state<string | null>(null);
+  let scanError = $state<string | null>(null);
+  // Auto-discovered APK list — re-scanned whenever the user picks a folder
+  // (or after a successful install in case files were added/removed).
   let discoveredApks = $state<DiscoveredApk[]>([]);
   let discoveredFolder = $state<string | null>(null);
+  let savedFolder = $state("");
   let discoveryBusy = $state(false);
-  let scanError = $state("");
   /// package id → state, for the discovered APKs, so each row can say whether
   /// it's already installed on this device.
   let apkInstallState = $state<Record<string, "enabled" | "disabled" | "missing">>({});
+  /// package id → the version currently installed on the device, for packages
+  /// that are installed. Compared against the APK's own version so a row can say
+  /// Upgrade / Downgrade / Reinstall instead of a flat "installed".
+  let apkInstalledVersions = $state<Record<string, InstalledVersion>>({});
 
-  /// Board 11.9 draws a drop target. HTML5 drag events never carry a real
-  /// path in a webview, so this uses Tauri's own drag-drop stream, which does.
-  /// It is a no-op outside the app shell (the screenshot pipeline runs in a
-  /// plain browser), so the pane simply never highlights there.
-  let dragging = $state(false);
-  let dropError = $state("");
-  /// A dropped APK is staged, never installed. Dropping a file used to install
-  /// it outright, so the first you knew of what you had installed was the
-  /// result message — the gesture is easy to make by accident and impossible
-  /// to take back.
-  let staged = $state<ApkInspection | null>(null);
-  let staging = $state(false);
+  // Install-all state: runs the discovered APKs one at a time (adb install is
+  // not safely concurrent against a single device) with a stop between files.
+  let batchRunning = $state(false);
+  let batchCancel = $state(false);
+  let batchDone = $state(0);
+  let batchTotal = $state(0);
+  let batchSummary = $state<string | null>(null);
+  let batchOk = $state(false);
+  let busy = $derived(sideloadBusy !== null || batchRunning);
+  /// The result of a one-off install whose file isn't in the listed folder —
+  /// it has no row to render under, so it shows below the list instead.
+  let looseResult = $derived(
+    lastInstalledPath && !discoveredApks.some((a) => a.path === lastInstalledPath)
+      ? (installResults[lastInstalledPath] ?? null)
+      : null,
+  );
 
-  async function stageApk(path: string) {
-    staging = true;
-    staged = null;
-    try {
-      staged = await api.inspectApk(serial, path);
-    } catch (e) {
-      dropError = `Could not read that APK: ${e}`;
-    } finally {
-      staging = false;
-    }
-  }
-  let unlistenDrop: (() => void) | null = null;
-  // Every opened tab stays mounted, hidden, and the webview's drop stream is
-  // window-wide — without this a file dropped on Files was also staged here.
-  let rootEl = $state<HTMLElement | undefined>(undefined);
+  // Quick-install catalog (arch-aware auto-download).
+  let quickApps = $state<QuickAppRow[]>([]);
+  let quickBusy = $state<string | null>(null);
+  let quickMsg = $state("");
+  let quickMsgPkg = $state<string | null>(null);
+  let quickOk = $state(false);
 
-  function isShowing(): boolean {
-    return !!rootEl && rootEl.closest("[hidden]") === null;
-  }
-
-  onMount(async () => {
-    try {
-      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-      unlistenDrop = await getCurrentWebview().onDragDropEvent((event) => {
-        if (!isShowing()) {
-          dragging = false;
-          return;
-        }
-        // `enter` carries paths too; only a real drop may stage anything, or
-        // hovering a file over the window would query the TV.
-        if (event.payload.type === "enter" || event.payload.type === "over") {
-          dragging = true;
-          return;
-        }
-        if (event.payload.type === "leave") {
-          dragging = false;
-          return;
-        }
-        dragging = false;
-        const apks = event.payload.paths.filter((path) => path.toLowerCase().endsWith(".apk"));
-        if (apks.length === 0) {
-          dropError = "That is not an .apk. Drop an APK file, or use Pick file…";
-          return;
-        }
-        if (apks.length > 1) {
-          // Installing several in one gesture would hide which one failed.
-          dropError = `Dropped ${apks.length} APKs — drop one at a time so each result is its own.`;
-          return;
-        }
-        dropError = "";
-        void stageApk(apks[0]);
-      });
-    } catch {
-      /* not running inside the app shell — no drop target, everything else works */
-    }
-  });
-
-  onDestroy(() => unlistenDrop?.());
+  let shizukuBusy = $state(false);
+  let shizukuMsg = $state("");
+  let shizukuOk = $state(false);
+  // Live install/running state for the status dot. null until the first probe
+  // (or if a probe fails) — rendered as "unknown" rather than a false negative.
+  let shizukuStatus = $state<ShizukuStatus | null>(null);
+  let shizukuCheckBusy = $state(false);
+  let shizukuStatusLabel = $derived(
+    shizukuStatus === null
+      ? shizukuCheckBusy
+        ? "Checking…"
+        : "Status unknown"
+      : shizukuStatus.running
+        ? "Service running"
+        : shizukuStatus.installed
+          ? "Installed · service stopped"
+          : "Not installed",
+  );
 
   async function pickAndInstallApk() {
     const selected = await openDialog({
@@ -115,8 +96,7 @@
     if (lastSep > 0) {
       const folder = selected.slice(0, lastSep);
       localStorage.setItem("shieldopt.lastApkFolder", folder);
-      savedFolder = folder;
-      await scanApkFolder(folder, "selected");
+      await scanApkFolder(folder);
     }
     await installApkPath(selected);
   }
@@ -125,64 +105,160 @@
     const picked = await openDialog({ multiple: false, directory: true });
     if (!picked || Array.isArray(picked)) return;
     localStorage.setItem("shieldopt.lastApkFolder", picked);
-    savedFolder = picked;
-    await scanApkFolder(picked, "selected");
+    await scanApkFolder(picked);
   }
 
-  async function scanApkFolder(folder: string, source: "saved" | "selected") {
+  async function scanApkFolder(folder: string) {
+    if (busy || discoveryBusy) return;
+    savedFolder = folder;
     discoveryBusy = true;
-    scanError = "";
+    scanError = null;
     try {
-      let apks: DiscoveredApk[];
-      try {
-        apks = await api.listApksInFolder(folder);
-      } catch {
-        scanError = source === "saved"
-          ? "Couldn't scan the saved folder. It may be unavailable or permission was denied."
-          : "Couldn't scan this folder. It may be unavailable or permission was denied.";
-        return;
-      }
-
-      discoveredApks = apks;
+      discoveredApks = await api.listApksInFolder(folder);
       discoveredFolder = folder;
-      apkInstallState = {};
-      const pkgs = apks.map((a) => a.package).filter((p): p is string => !!p);
-      if (pkgs.length) {
-        try {
-          apkInstallState = await api.packageStates(serial, pkgs);
-        } catch {
-          const folderLabel = source === "saved" ? "saved folder" : "selected folder";
-          scanError = `APK files were read from the ${folderLabel}, but app status couldn't be checked on this TV.`;
-        }
-      }
+      batchSummary = null;
+      await refreshInstallState();
+    } catch (e) {
+      scanError = `Scan failed: ${e}`;
     } finally {
       discoveryBusy = false;
     }
   }
 
-  async function scanSavedFolder() {
-    if (!savedFolder || discoveryBusy || sideloadBusy !== null) return;
-    await scanApkFolder(savedFolder, "saved");
+  /// Re-query install state + installed versions for the currently discovered
+  /// APKs, without re-listing the folder. Run on scan and again after a
+  /// successful install so a row's chip reflects the new version right away.
+  async function refreshInstallState() {
+    const pkgs = discoveredApks.map((a) => a.package).filter((p): p is string => !!p);
+    apkInstallState = pkgs.length ? await api.packageStates(serial, pkgs) : {};
+    // Versions only matter for packages actually on the device.
+    const installedPkgs = pkgs.filter(
+      (p) => apkInstallState[p] === "enabled" || apkInstallState[p] === "disabled",
+    );
+    apkInstalledVersions = installedPkgs.length
+      ? await api.installedPackageVersions(serial, installedPkgs)
+      : {};
   }
 
-  async function installApkPath(path: string) {
+  /// Install one APK. `refresh` is turned off by the Install-all loop, which
+  /// re-queries once at the end instead of after every file. `allowDowngrade`
+  /// adds `-d` up front for rows we already know are downgrades; anything else
+  /// gets the backend's automatic retry.
+  async function installApkPath(
+    path: string,
+    refresh = true,
+    allowDowngrade = false,
+  ): Promise<boolean> {
     sideloadBusy = path;
-    sideloadResultPath = path;
-    sideloadOk = false;
-    sideloadResult = "";
-    sideloadHint = null;
+    lastInstalledPath = path;
+    delete installResults[path];
+    // A single install invalidates the previous run's tally.
+    if (!batchRunning) batchSummary = null;
     try {
-      const r = await api.installApk(serial, path, true);
-      sideloadOk = r.ok;
+      const r = await api.installApk(serial, path, true, allowDowngrade);
       // Friendly summary; the raw adb output is kept for the details line.
-      sideloadResult = r.ok
-        ? "Installed."
-        : installFailureSummary(r.message);
-      sideloadHint = r.hint;
+      installResults[path] = {
+        ok: r.ok,
+        message: r.ok ? (r.downgraded ? "Downgraded." : "Installed.") : installFailureSummary(r.message),
+        hint: r.hint,
+        // The backend only decodes the package when it's needed here.
+        blockedPackage: r.downgrade_blocked
+          ? (r.package ?? discoveredApks.find((a) => a.path === path)?.package ?? null)
+          : null,
+      };
+      // Refresh so the row's chip flips to the newly-installed version (best
+      // effort — a failure here shouldn't clobber the success message).
+      if (refresh && r.ok && discoveredFolder) {
+        try {
+          await refreshInstallState();
+        } catch {
+          // Keep the "Installed." result even if the re-query fails.
+        }
+      }
+      return r.ok;
     } catch (e) {
-      sideloadResult = String(e);
+      installResults[path] = { ok: false, message: String(e), hint: null, blockedPackage: null };
+      return false;
     } finally {
       sideloadBusy = null;
+    }
+  }
+
+  /// Last resort when Android refuses the downgrade even with `-d` — it only
+  /// honors that flag for debuggable apps, so on a retail build the installed
+  /// copy has to go first. That takes the app's data with it, hence the ask.
+  async function uninstallThenInstall(path: string, pkg: string | null) {
+    if (!pkg) return;
+    if (
+      !confirm(
+        `Uninstall ${pkg} from the device, then install this APK?\n\nAndroid won't replace a newer version in place, so the installed copy has to be removed first. Its saved data and sign-in go with it.`,
+      )
+    )
+      return;
+    sideloadBusy = path;
+    try {
+      const r = await api.uninstallPackage(serial, pkg);
+      if (!r.ok) {
+        installResults[path] = {
+          ok: false,
+          message: `Uninstall failed: ${r.message}`,
+          hint: null,
+          blockedPackage: null,
+        };
+        return;
+      }
+    } catch (e) {
+      installResults[path] = {
+        ok: false,
+        message: `Uninstall failed: ${e}`,
+        hint: null,
+        blockedPackage: null,
+      };
+      return;
+    } finally {
+      sideloadBusy = null;
+    }
+    await installApkPath(path);
+  }
+
+  /// Install every discovered APK, in list order, one at a time. Each row keeps
+  /// its own result; the run-level tally lands in `batchSummary`.
+  async function installAll() {
+    const targets = discoveredApks.map((a) => a.path);
+    if (targets.length === 0 || batchRunning) return;
+    batchRunning = true;
+    batchCancel = false;
+    batchDone = 0;
+    batchTotal = targets.length;
+    batchSummary = null;
+    installResults = {};
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const path of targets) {
+        if (batchCancel) break;
+        if (await installApkPath(path, false)) ok++;
+        else failed++;
+        batchDone++;
+      }
+      if (ok > 0) {
+        try {
+          await refreshInstallState();
+        } catch {
+          // Keep the batch results even if the re-query fails.
+        }
+      }
+      // Stopping early isn't a failure — only real install errors mark it bad.
+      const skipped = batchTotal - batchDone;
+      batchOk = failed === 0;
+      batchSummary =
+        `Installed ${ok} of ${batchTotal}` +
+        (failed > 0 ? ` · ${failed} failed` : "") +
+        (skipped > 0 ? ` · ${skipped} skipped` : "") +
+        ".";
+    } finally {
+      batchRunning = false;
+      batchCancel = false;
     }
   }
 
@@ -192,12 +268,66 @@
     const m = raw.match(/INSTALL_FAILED_[A-Z_]+|INSTALL_PARSE_FAILED[A-Z_]*/);
     if (m) {
       if (m[0].includes("ALREADY_EXISTS")) return "Already installed (same version).";
-      if (m[0].includes("VERSION_DOWNGRADE")) return "A newer version is already installed.";
+      if (m[0].includes("VERSION_DOWNGRADE")) return "Downgrade refused — a newer version is installed.";
       if (m[0].includes("NO_MATCHING_ABIS")) return "Wrong CPU architecture for this device.";
       if (m[0].includes("OLDER_SDK")) return "Needs a newer Android version than this device.";
       return `Install failed (${m[0]}).`;
     }
     return "Install failed.";
+  }
+
+  /// The install status of one discovered APK, comparing its manifest version
+  /// against what's installed on the device. Drives the row's chip and its
+  /// action-button label. `kind` doubles as the chip's CSS class.
+  ///   none      — not installed (or package unknown): plain "Install"
+  ///   installed — installed but versions can't be compared
+  ///   reinstall — same versionCode already installed
+  ///   upgrade   — the APK is newer than the installed copy
+  ///   downgrade — the APK is older than the installed copy
+  function apkStatus(apk: DiscoveredApk): {
+    kind: "none" | "installed" | "reinstall" | "upgrade" | "downgrade";
+    disabled: boolean;
+    label: string;
+    button: string;
+  } {
+    const pkg = apk.package;
+    const state = pkg ? apkInstallState[pkg] : undefined;
+    if (!pkg || (state !== "enabled" && state !== "disabled")) {
+      return { kind: "none", disabled: false, label: "", button: "Install" };
+    }
+    const disabled = state === "disabled";
+    const suffix = disabled ? " (disabled)" : "";
+    const dev = apkInstalledVersions[pkg];
+    const apkCode = apk.version_code;
+    const devCode = dev?.version_code ?? null;
+
+    // Can't compare (either side's versionCode unknown) → flat installed chip.
+    if (apkCode == null || devCode == null) {
+      return { kind: "installed", disabled, label: `INSTALLED${suffix}`, button: "Reinstall" };
+    }
+
+    const from = dev?.version_name;
+    const to = apk.version_name;
+    const arrow = from && to ? ` ${from} → ${to}` : "";
+
+    if (apkCode > devCode) {
+      return { kind: "upgrade", disabled, label: `UPGRADE${arrow}${suffix}`, button: "Upgrade" };
+    }
+    if (apkCode < devCode) {
+      return { kind: "downgrade", disabled, label: `DOWNGRADE${arrow}${suffix}`, button: "Downgrade" };
+    }
+    // Equal versionCode. The chip describes the device, so the version it names
+    // is always the device's — never the APK's. A build that bumps versionName
+    // without bumping versionCode lands here with the two names differing, so
+    // name both rather than passing the APK's off as what's installed.
+    const devVer = from ? ` · v${from}` : "";
+    const apkVer = to && to !== from ? ` · APK v${to}` : "";
+    return {
+      kind: "reinstall",
+      disabled,
+      label: `INSTALLED${devVer}${apkVer}${suffix}`,
+      button: "Reinstall",
+    };
   }
 
   function formatBytes(n: number): string {
@@ -207,372 +337,297 @@
     return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
   }
 
-  const ISSUES_URL = "https://github.com/bryanroscoe/shield_optimizer/issues/new";
-
-  async function openDownloadPage(url: string) {
+  async function loadQuickApps() {
     try {
-      await openUrl(url);
+      quickApps = await api.listQuickApps(serial);
+    } catch {
+      // Non-fatal — the rest of the tab still works without the catalog.
+    }
+  }
+
+  async function installQuick(pkg: string) {
+    quickBusy = pkg;
+    quickMsgPkg = pkg;
+    quickMsg = "";
+    quickOk = false;
+    try {
+      const r = await api.installQuickApp(serial, pkg);
+      quickOk = r.ok;
+      quickMsg = r.ok ? "Installed." : installFailureSummary(r.message);
+      if (r.ok) await loadQuickApps();
     } catch (e) {
-      sideloadResult = `Open link failed: ${e}`;
+      quickMsg = String(e);
+    } finally {
+      quickBusy = null;
+    }
+  }
+
+  async function setupShizuku() {
+    shizukuBusy = true;
+    shizukuMsg = "";
+    shizukuOk = false;
+    try {
+      const r = await api.setupShizuku(serial);
+      shizukuOk = r.ok;
+      shizukuMsg = r.message;
+      await loadQuickApps();
+      await checkShizuku();
+    } catch (e) {
+      shizukuMsg = String(e);
+    } finally {
+      shizukuBusy = false;
+    }
+  }
+
+  /// Probe whether Shizuku is installed and its service is live — drives the
+  /// status dot. Best-effort: a failed probe leaves the dot in the "unknown"
+  /// state rather than reporting a false "stopped".
+  async function checkShizuku() {
+    shizukuCheckBusy = true;
+    try {
+      shizukuStatus = await api.shizukuStatus(serial);
+    } catch {
+      shizukuStatus = null;
+    } finally {
+      shizukuCheckBusy = false;
     }
   }
 
   onMount(() => {
     const last = localStorage.getItem("shieldopt.lastApkFolder");
-    if (last?.trim()) savedFolder = last;
+    if (last) savedFolder = last;
+    loadQuickApps();
+    checkShizuku();
   });
 </script>
 
-<div class="card" role="tabpanel" tabindex={0} id="tabpanel-sideload" aria-labelledby="tab-sideload" bind:this={rootEl}>
+<div role="tabpanel" tabindex={0} id="tabpanel-sideload" aria-labelledby="tab-sideload">
+<div class="card">
   <div class="card-header">
-    <div class="header-title">
-      <h2><Icon name="download" size={20} /> Install APK</h2>
-      <p class="muted small mono header-sub">sideload to {deviceLabel || serial}</p>
-    </div>
+    <h2>Install APK</h2>
     <div class="header-actions">
-      <button onclick={pickApkFolder} disabled={sideloadBusy !== null || discoveryBusy}>
+      <button onclick={pickApkFolder} disabled={busy || discoveryBusy}>
         {discoveryBusy ? "Scanning…" : "Choose folder…"}
       </button>
-      <button class="primary" onclick={pickAndInstallApk} disabled={sideloadBusy !== null || discoveryBusy}>
-        {sideloadBusy !== null ? "Installing…" : "Pick file…"}
+      <button class="primary" onclick={pickAndInstallApk} disabled={busy}>
+        {sideloadBusy !== null && !batchRunning ? "Installing…" : "Pick file…"}
       </button>
     </div>
   </div>
   <p class="muted small">
     Pick a file directly, or point at a folder and we'll list every APK inside.
-    Either way, install runs <code>adb install -r &lt;file&gt;</code>.
+    Either way, install runs <code>adb install -r &lt;file&gt;</code> — and
+    <code>-d</code> on top when the APK is older than what's on the device, so
+    downgrades go through where Android allows them.
   </p>
 
-  <div class="sideload-layout">
-    <div class="sideload-main">
-  {#if staging}
-    <p class="muted">Reading that APK…</p>
-  {:else if staged}
-    {@const mismatch = staged.abi_compatible === false}
-    <div class="staged-card" class:mismatch>
-      <div class="staged-head">
-        <span class="apk-icon" aria-hidden="true"><Icon name="android" size={18} /></span>
-        <div class="staged-title">
-          <div class="apk-name">{staged.name}</div>
-          <div class="muted small mono">
-            {staged.package ?? "package id unreadable"} · {formatBytes(staged.size_bytes)}
-          </div>
-        </div>
+  {#if savedFolder}
+    <div class="apk-folder-row"><span class="mono">{savedFolder}</span><button onclick={() => scanApkFolder(savedFolder)} disabled={busy || discoveryBusy}>Scan folder</button></div>
+  {/if}
+  {#if discoveredFolder && discoveredApks.length > 0}
+    <div class="apk-folder-row">
+      <div class="apk-folder muted small mono">
+        {discoveredFolder} — {discoveredApks.length} APK{discoveredApks.length === 1 ? "" : "s"} found
       </div>
-      <dl class="staged-facts">
-        <dt>Package</dt>
-        <dd class="mono">{staged.package ?? "could not read the manifest"}</dd>
-        <dt>Native code</dt>
-        <dd class="mono">
-          {#if staged.abis.length === 0}
-            none — runs on any architecture
-          {:else}
-            {staged.abis.join(", ")}
+      {#if discoveredApks.length > 1}
+        <div class="batch-actions">
+          <button class="small-action primary" onclick={installAll} disabled={busy || discoveryBusy}>
+            {batchRunning
+              ? `Installing ${Math.min(batchDone + 1, batchTotal)}/${batchTotal}…`
+              : `Install all (${discoveredApks.length})`}
+          </button>
+          {#if batchRunning}
+            <button class="small-action" onclick={() => (batchCancel = true)} disabled={batchCancel}>
+              {batchCancel ? "Stopping…" : "Stop"}
+            </button>
           {/if}
-        </dd>
-        <dt>This TV</dt>
-        <dd class="mono">{staged.device_abis.length ? staged.device_abis.join(", ") : "not reported"}</dd>
-        <dt>Already installed</dt>
-        <dd class="mono">{staged.already_installed === true ? "yes — this would replace it" : staged.already_installed === false ? "no" : "unknown — couldn't ask the TV"}</dd>
-      </dl>
-      <!-- `abi_compatible` is null when we could not read one side. That is not
-           a mismatch and must not be drawn as one. -->
-      {#if mismatch}
-        <div class="callout callout-warn">
-          <Icon name="warning" size={16} />
-          <span>
-            This APK ships native code for {staged.abis.join(", ")}, and this TV
-            reports {staged.device_abis.join(", ")}. It will probably fail to
-            install, or install and crash on launch.
-          </span>
-        </div>
-      {:else if staged.abi_compatible === null && staged.abis.length > 0}
-        <div class="callout">
-          <Icon name="info" size={16} />
-          <span>
-            The TV did not report its architecture, so whether this APK's native
-            code matches could not be checked.
-          </span>
         </div>
       {/if}
-      <p class="muted small">
-        Nothing has been installed. This is a third-party build from outside the
-        Play Store — install it only if you know where it came from.
-      </p>
-      <div class="staged-actions">
-        <button
-          class="primary"
-          onclick={() => { const path = staged?.path; staged = null; if (path) void installApkPath(path); }}
-          disabled={sideloadBusy !== null}
-        >
-          {staged.already_installed === true ? "Reinstall" : "Install"}{staged.package ? ` ${staged.package}` : ""}
-        </button>
-        <button onclick={() => (staged = null)} disabled={sideloadBusy !== null}>Cancel</button>
-      </div>
     </div>
-  {/if}
-  {#if savedFolder}
-    <!-- The board's watch-folder card: the path you scan, and the one control
-         that changes it, on one line. -->
-    <div class="saved-folder">
-      <div class="saved-folder-head">
-        <span class="folder-icon" aria-hidden="true"><Icon name="folder_open" size={18} /></span>
-        <div class="saved-folder-path small">
-          <strong>Watch folder</strong>
-          <code>{savedFolder}</code>
-        </div>
-        <button
-          class="small-action"
-          onclick={scanSavedFolder}
-          disabled={discoveryBusy || sideloadBusy !== null}
-        >
-          {discoveryBusy ? "Scanning…" : "Scan folder"}
-        </button>
-      </div>
-      <p class="muted small">
-        Scanning reads APK files in this folder and checks whether detected apps are installed on
-        this TV. Scanning does not install apps.
-      </p>
-    </div>
-  {/if}
-
-  {#if scanError}
-    <div class="install-result bad" role="alert"><span><Icon name="close" size={16} /> {scanError}</span></div>
-  {/if}
-
-  {#if discoveredFolder && discoveredApks.length > 0}
-    <p class="rail-label">Discovered APKs · {discoveredApks.length}</p>
-    <div class="apk-folder muted small mono">{discoveredFolder}</div>
     <ul class="apk-list">
       {#each discoveredApks as apk (apk.path)}
+        {@const status = apkStatus(apk)}
         <li>
           <div class="apk-row">
-            <span class="apk-icon" aria-hidden="true"><Icon name="android" size={18} /></span>
             <div class="apk-meta">
               <div class="apk-name">{apk.name}</div>
               <div class="muted small">
                 {formatBytes(apk.size_bytes)}
                 {#if apk.package}
                   · {apk.package}
-                  {#if apkInstallState[apk.package] === "enabled"}
-                    <span class="tag installed">INSTALLED</span>
-                  {:else if apkInstallState[apk.package] === "disabled"}
-                    <span class="tag disabled">INSTALLED (disabled)</span>
+                  {#if status.kind !== "none"}
+                    <span
+                      class="tag"
+                      class:installed={status.kind === "installed"}
+                      class:reinstall={status.kind === "reinstall"}
+                      class:upgrade={status.kind === "upgrade"}
+                      class:downgrade={status.kind === "downgrade"}
+                      class:is-disabled={status.disabled}>{status.label}</span>
                   {/if}
                 {/if}
               </div>
             </div>
             <button
               class="small-action primary"
-              onclick={() => installApkPath(apk.path)}
-              disabled={sideloadBusy !== null}
+              onclick={() => installApkPath(apk.path, true, status.kind === "downgrade")}
+              disabled={busy}
             >
               {sideloadBusy === apk.path
-                ? "Installing…"
-                : apk.package &&
-                    (apkInstallState[apk.package] === "enabled" ||
-                      apkInstallState[apk.package] === "disabled")
-                  ? "Reinstall"
-                  : "Install"}
+                ? status.kind === "downgrade"
+                  ? "Downgrading…"
+                  : "Installing…"
+                : status.button}
             </button>
           </div>
-          {#if sideloadResultPath === apk.path && sideloadResult}
-            <div class="install-result" class:ok={sideloadOk} class:bad={!sideloadOk}>
-              <span><Icon name={sideloadOk ? "check" : "close"} size={16} /> {sideloadResult}</span>
-              {#if sideloadHint}<span class="muted small"> — {sideloadHint}</span>{/if}
-            </div>
+          {#if installResults[apk.path]}
+            {@render resultLine(apk.path, installResults[apk.path])}
           {/if}
         </li>
       {/each}
     </ul>
+    {#if batchSummary}
+      <div class="install-result" class:ok={batchOk} class:bad={!batchOk}>
+        <span>{batchOk ? "✓" : "✕"} {batchSummary}</span>
+      </div>
+    {/if}
   {:else if discoveredFolder}
-    <p class="muted small">No <code>.apk</code> files in the scanned folder: {discoveredFolder}.</p>
-  {:else if !savedFolder && !staged && !staging}
-    <div class="sideload-empty" class:dragging>
-      <Icon name="upload" size={28} />
-      <strong>{dragging ? "Drop to review" : "Drop an .apk here"}</strong>
-      <span class="small">
-        Nothing installs until you confirm. Or Choose folder… to list every APK
-        inside it and keep it for next time, or Pick file… to install one.
-      </span>
-      {#if dropError}<span class="small drop-error">{dropError}</span>{/if}
-    </div>
+    <p class="muted small">No <code>.apk</code> files in {discoveredFolder}.</p>
   {/if}
 
-  {#if sideloadResult && !discoveredApks.some((a) => a.path === sideloadResultPath)}
-    <div class="install-result" class:ok={sideloadOk} class:bad={!sideloadOk}>
-      <span><Icon name={sideloadOk ? "check" : "close"} size={16} /> {sideloadResult}</span>
-      {#if sideloadHint}<span class="muted small"> — {sideloadHint}</span>{/if}
-    </div>
+  {#if scanError}
+    <div class="install-result bad"><span>✕ {scanError}</span></div>
   {/if}
 
-    </div>
+  {#if looseResult && lastInstalledPath}
+    {@render resultLine(lastInstalledPath, looseResult)}
+  {/if}
+</div>
 
-    <!-- The board gives the catalog a permanent rail rather than a disclosure.
-         It is the answer to "what do I even install", so it should not be a
-         thing you have to know to open. -->
-    <aside class="sideload-rail">
-      <p class="rail-label">Popularly requested sideloads · {sideloadCatalog.length}</p>
-      <ul class="catalog-list">
-        {#each sideloadCatalog as entry (entry.package)}
-          <li>
-            <div class="catalog-text">
-              <div class="apk-name">{entry.name}</div>
-              <div class="muted small">{entry.description}</div>
-              <div class="muted small mono catalog-pkg">{entry.package}</div>
-            </div>
-            {#if apkInstallState[entry.package] === "enabled"}
-              <span class="tag installed">INSTALLED</span>
-            {:else if apkInstallState[entry.package] === "disabled"}
-              <span class="tag disabled">INSTALLED (disabled)</span>
-            {/if}
-            <!-- This opens a web page; it does not download or install
-                 anything. A download glyph here promised otherwise. -->
-            <button
-              class="catalog-get"
-              onclick={() => openDownloadPage(entry.url)}
-              title={`Open the official download page in your browser — ${entry.url}`}
-              aria-label={`Open the official download page for ${entry.name}`}
-            ><Icon name="open_in_new" size={16} /> <span>Get</span></button>
-          </li>
-        {/each}
-      </ul>
-      <p class="muted small rail-note">
-        Apps people ask for that aren't on the Play Store; links go to the official
-        source only. Download there, then install with the buttons on the left.
-        <button class="link-button" onclick={() => openDownloadPage(ISSUES_URL)}>
-          Suggest one on GitHub
-        </button>
-      </p>
-    </aside>
+{#snippet resultLine(path: string, res: InstallOutcome)}
+  <div class="install-result" class:ok={res.ok} class:bad={!res.ok}>
+    <span>{res.ok ? "✓" : "✕"} {res.message}</span>
+    {#if res.hint}<span class="muted small"> — {res.hint}</span>{/if}
+    {#if res.blockedPackage}
+      <button
+        class="small-action"
+        onclick={() => uninstallThenInstall(path, res.blockedPackage)}
+        disabled={busy}
+      >
+        Uninstall &amp; install
+      </button>
+    {/if}
   </div>
+{/snippet}
+
+<div class="card section-card">
+  <div class="shizuku-row">
+    <div>
+      <div class="shizuku-header">
+        <h2>Shizuku</h2>
+        <span
+          class="status-dot"
+          class:running={shizukuStatus?.running}
+          class:stopped={!!shizukuStatus && shizukuStatus.installed && !shizukuStatus.running}
+          class:checking={shizukuCheckBusy}
+          aria-hidden="true"
+        ></span>
+        <span class="shizuku-status muted small">{shizukuStatusLabel}</span>
+        <button
+          class="icon-check"
+          onclick={checkShizuku}
+          disabled={shizukuCheckBusy}
+          title="Check whether Shizuku's service is running"
+          aria-label="Check Shizuku status"
+        >
+          {shizukuCheckBusy ? "…" : "⟳"}
+        </button>
+      </div>
+      <div class="muted small">
+        Installs Shizuku if it's missing, then starts its service so other apps can use
+        elevated ADB permissions — no root, and no pairing code (Android TV never shows
+        one). The service stops on reboot; press this again to start it back up.
+      </div>
+      {#if shizukuMsg}
+        <div class="install-result" class:ok={shizukuOk} class:bad={!shizukuOk}>
+          <span>{shizukuOk ? "✓" : "✕"} {shizukuMsg}</span>
+        </div>
+      {/if}
+    </div>
+    <button class="primary" onclick={setupShizuku} disabled={shizukuBusy}>
+      {shizukuBusy ? "Starting…" : "Install / Start"}
+    </button>
+  </div>
+</div>
+
+<div class="card section-card">
+  <h2>Quick install</h2>
+  <p class="muted small">
+    We fetch the build that matches your device's CPU from the official source and
+    install it. This briefly turns off Play Protect (which flags these apps) and
+    restores it afterward.
+  </p>
+  {#if quickApps.length > 0}
+    <ul class="catalog-list">
+      {#each quickApps as q (q.package)}
+        <li>
+          <div>
+            <div class="apk-name">{q.name}</div>
+            <div class="muted small">{q.description}</div>
+            <div class="muted small mono">
+              {q.package}
+              {#if q.installed}<span class="tag installed">INSTALLED</span>{/if}
+            </div>
+            {#if quickMsgPkg === q.package && quickMsg}
+              <div class="install-result" class:ok={quickOk} class:bad={!quickOk}>
+                <span>{quickOk ? "✓" : "✕"} {quickMsg}</span>
+              </div>
+            {/if}
+          </div>
+          <button
+            class="small-action primary"
+            onclick={() => installQuick(q.package)}
+            disabled={quickBusy !== null}
+          >
+            {quickBusy === q.package ? "Installing…" : q.installed ? "Reinstall" : "Install"}
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {:else}
+    <p class="muted small">Catalog not loaded — check the connection and reopen this tab.</p>
+  {/if}
+</div>
 </div>
 
 <style>
   /* Shared scoped utilities duplicated from the page; global rules
      (.muted, button, input) live in the layout and are inherited. */
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem;
+  }
+  .card h2 {
+    margin: 0 0 0.8rem;
+    font-size: 1.1rem;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
   .header-actions {
     display: flex;
     gap: 0.8rem;
     align-items: center;
   }
-  .header-title {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-  }
-  .header-title h2 {
-    margin: 0;
-  }
-  .header-sub {
-    margin: 0;
-  }
-  /* What you have on the left, what you could have on the right — board 11.9.
-     The catalog was a closed <details> at the bottom, which is the wrong place
-     for the answer to "what do I even install". */
-  .sideload-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
-    gap: 1.5rem;
-    align-items: start;
-    margin-top: 1rem;
-  }
-  .sideload-main,
-  .sideload-rail {
-    min-width: 0;
-  }
-  .rail-label {
-    margin: 1rem 0 0.5rem;
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-  }
-  .sideload-rail .rail-label {
-    margin-top: 0;
-  }
-  .rail-note {
-    margin-top: 0.7rem;
-  }
-  /* Reads as the link it is, inside the sentence, rather than as a button
-     parked under it. */
-  .link-button {
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: var(--accent);
-    text-decoration: underline;
-    cursor: pointer;
-  }
-  .saved-folder-head {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-  }
-  .folder-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: 2.2rem;
-    height: 2.2rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-inset);
-    color: var(--fg-muted);
-  }
-  .saved-folder-head .saved-folder-path {
-    flex: 1;
-    min-width: 0;
-  }
-  .apk-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: 2.2rem;
-    height: 2.2rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-inset);
-    color: var(--ok);
-  }
-  .catalog-text {
-    flex: 1;
-    min-width: 0;
-  }
-  .catalog-pkg {
-    overflow-wrap: anywhere;
-  }
-  /* A link out, not an install — the icon says "fetch it", and the title says
-     where from, because sideloading somebody else's build deserves a name. */
-  .catalog-get {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.25rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--accent);
-    font-size: 0.78rem;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .catalog-get:hover {
-    border-color: var(--border);
-    background: var(--bg-button-hover);
-  }
-
   .small {
     font-size: 0.82rem;
   }
   .mono {
-    font-family: var(--mono);
+    font-family: ui-monospace, monospace;
   }
   .small-action {
     padding: 0.2rem 0.6rem;
@@ -581,52 +636,44 @@
   .tag {
     font-size: 0.7rem;
     padding: 0.15rem 0.5rem;
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
     letter-spacing: 0.04em;
   }
-  .tag.installed { background: var(--ok-surface); color: var(--ok); }
-  .tag.disabled { background: var(--warn-surface-2); color: var(--warn); }
+  .tag.installed,
+  .tag.reinstall { background: var(--ok-surface); color: var(--ok); }
+  .tag.upgrade { background: var(--accent-glow); color: var(--accent); }
+  .tag.downgrade { background: var(--warn-surface-2); color: var(--warn); }
+  /* A disabled install is still installed — keep the kind's color but mute it. */
+  .tag.is-disabled { opacity: 0.6; }
   code {
     background: var(--bg-inset);
     border: 1px solid var(--border);
     padding: 0.1rem 0.4rem;
-    border-radius: var(--radius-sm);
-    font-family: var(--mono);
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
     font-size: 0.85em;
   }
 
   /* Install-APK–specific styles. */
+  .apk-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
   .apk-folder {
+    flex: 1;
+    min-width: 0;
     margin: 0.4rem 0;
     padding: 0.4rem 0.6rem;
     background: var(--bg-inset);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 4px;
     word-break: break-all;
   }
-  .saved-folder {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.5rem 0.8rem;
-    align-items: center;
-    margin: 0.8rem 0;
-    padding: 0.7rem;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-  }
-  .saved-folder-path {
+  .batch-actions {
     display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    min-width: 0;
-  }
-  .saved-folder-path code {
-    overflow-wrap: anywhere;
-  }
-  .saved-folder p {
-    grid-column: 1 / -1;
-    margin: 0;
+    gap: 0.4rem;
+    flex-shrink: 0;
   }
   .apk-list {
     list-style: none;
@@ -635,7 +682,7 @@
   }
   .apk-list li {
     padding: 0.5rem 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--bg-button);
   }
   .apk-list li:last-child {
     border-bottom: none;
@@ -652,90 +699,62 @@
   }
   .install-result.ok { color: var(--ok); }
   .install-result.bad { color: var(--warn); }
+  .install-result button {
+    margin-left: 0.6rem;
+    vertical-align: baseline;
+  }
   .apk-name {
-    font-family: var(--mono);
+    font-family: ui-monospace, monospace;
     font-size: 0.88rem;
     word-break: break-all;
   }
-  .catalog-text .apk-name {
-    font-family: var(--sans);
-    font-size: 0.92rem;
-    font-weight: 600;
-    word-break: normal;
+  .section-card {
+    margin-top: 1rem;
   }
-  /* Nothing scanned yet is a state, not a blank half-screen. */
-  .sideload-empty {
+  .shizuku-row {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .shizuku-header {
+    display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 2.5rem 1.5rem;
-    border: 1px dashed var(--border);
-    border-radius: var(--radius-lg);
-    text-align: center;
-    color: var(--fg-muted);
-    transition: border-color 0.1s, background 0.1s;
+    margin-bottom: 0.3rem;
   }
-  .sideload-empty.dragging {
-    border-color: var(--accent);
-    background: var(--accent-surface);
-    color: var(--fg-secondary);
-  }
-  .sideload-empty.dragging :global(.msr) {
-    color: var(--accent);
-  }
-  .drop-error {
-    color: var(--warn);
-  }
-  /* A dropped APK lands here, not on the device. */
-  .staged-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-    padding: 1rem 1.1rem;
-    margin-bottom: 1rem;
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-lg);
-    background: var(--bg-surface-2);
-  }
-  .staged-card.mismatch {
-    border-color: color-mix(in srgb, var(--warn) 55%, transparent);
-  }
-  .staged-head {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .staged-title {
-    min-width: 0;
-  }
-  .staged-facts {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.3rem 1rem;
+  .shizuku-header h2 {
     margin: 0;
+  }
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    /* Default (not installed / unknown): muted. */
+    background: var(--fg-muted);
+  }
+  .status-dot.stopped {
+    background: var(--warn);
+  }
+  .status-dot.running {
+    background: var(--ok);
+    box-shadow: 0 0 6px var(--ok);
+  }
+  .status-dot.checking {
+    opacity: 0.5;
+  }
+  .shizuku-status {
+    font-size: 0.8rem;
+  }
+  .icon-check {
+    padding: 0.1rem 0.4rem;
     font-size: 0.85rem;
+    line-height: 1;
   }
-  .staged-facts dt {
-    color: var(--fg-muted);
-  }
-  .staged-facts dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-  .staged-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-  }
-
-  .sideload-empty :global(.msr) {
-    color: var(--fg-muted);
-  }
-  .sideload-empty strong {
-    color: var(--fg-secondary);
-    font-weight: 600;
+  .shizuku-row > button {
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .catalog-list {
     list-style: none;
@@ -748,7 +767,7 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.6rem 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--bg-button);
   }
   .catalog-list li button {
     white-space: nowrap;
