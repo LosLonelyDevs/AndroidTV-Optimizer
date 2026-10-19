@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::State;
 
-use crate::adb::{parse_ls_output, FileEntry};
+use crate::adb::{parse_du_output, parse_ls_output, DiskUsageEntry, FileEntry};
 
 use super::AppState;
 
@@ -335,6 +335,83 @@ pub async fn find_files(
         }
     }
     Ok(FindResult { hits, unsearched })
+}
+
+/// Files smaller than this never make the "largest files" list — the cut keeps
+/// `find` from streaming thousands of thumbnails back over adb.
+const LARGE_FILE_MIN_KB: u64 = 1024;
+/// How many of the largest files to return.
+const LARGEST_FILES: usize = 60;
+
+/// Where the space went under one `/sdcard` directory.
+#[derive(Serialize)]
+pub struct StorageUsage {
+    pub path: String,
+    /// Immediate children — folders and top-level files — largest first.
+    pub children: Vec<DiskUsageEntry>,
+    /// The biggest individual files at any depth below `path`, largest first.
+    pub largest_files: Vec<DiskUsageEntry>,
+    /// Total for `path` itself.
+    pub total_bytes: u64,
+}
+
+/// `storage_usage` — disk usage under a `/sdcard` directory: children rolled
+/// up, plus the largest files anywhere beneath. Separate from `health_report`
+/// because this walks the filesystem; the caller asks for it on demand.
+#[tauri::command]
+pub async fn storage_usage(
+    state: State<'_, AppState>,
+    serial: String,
+    path: String,
+) -> Result<StorageUsage, String> {
+    let path = validate_sdcard_path(&path)?;
+    // Same symlink trap as `list_dir`: without the trailing slash `du` reports
+    // the `/sdcard` link itself (0 bytes) instead of walking the tree.
+    let quoted = quote_path(&format!("{}/", path.trim_end_matches('/')));
+    let adb = state.adb_snapshot().await;
+
+    // `2>/dev/null` drops the unreadable-directory noise from /sdcard/Android
+    // on Android 11+; a partial total beats failing the whole panel.
+    let dirs_cmd = format!("du -k -d 1 {quoted} 2>/dev/null");
+    let files_cmd = format!("find {quoted} -maxdepth 1 -type f -exec du -k {{}} + 2>/dev/null");
+    let largest_cmd = format!(
+        "find {quoted} -type f -size +{LARGE_FILE_MIN_KB}k -exec du -k {{}} + 2>/dev/null          | sort -rn | head -{LARGEST_FILES}"
+    );
+    let (dirs_res, files_res, largest_res) = tokio::join!(
+        adb.shell(&serial, &dirs_cmd),
+        adb.shell(&serial, &files_cmd),
+        adb.shell(&serial, &largest_cmd),
+    );
+
+    let dirs_out = dirs_res.map_err(|e| format!("du: {e}"))?;
+    if dirs_out.combined().contains("No such file or directory") {
+        return Err(format!("No such directory: {path}"));
+    }
+
+    let dirs = parse_du_output(&dirs_out.stdout, true);
+    // `du -d 1` reports the directory we asked about alongside its children.
+    let total_bytes = dirs
+        .iter()
+        .find(|e| e.path == path)
+        .map(|e| e.bytes)
+        .unwrap_or(0);
+
+    let mut children: Vec<DiskUsageEntry> = dirs.into_iter().filter(|e| e.path != path).collect();
+    if let Ok(out) = files_res {
+        children.extend(parse_du_output(&out.stdout, false));
+    }
+    children.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+
+    let largest_files = largest_res
+        .map(|out| parse_du_output(&out.stdout, false))
+        .unwrap_or_default();
+
+    Ok(StorageUsage {
+        path,
+        children,
+        largest_files,
+        total_bytes,
+    })
 }
 
 #[cfg(test)]

@@ -86,7 +86,7 @@ async function exercise({ browser, base }) {
   const healthSuggestion = (await healthCell.innerText()).trim();
 
   // Clicking the row opens the App List on that package.
-  await healthRow.click();
+  await healthRow.getByRole("button", { name: HEALTH_APP, exact: true }).click();
   const apps = page.locator("#tabpanel-apps");
   await apps.waitFor();
   await waitResolved(page, "#tabpanel-apps td.verdict-cell");
@@ -117,7 +117,7 @@ async function exercise({ browser, base }) {
   );
   await page.getByRole("tab", { name: "Health" }).click();
   assert.equal((await healthCell.innerText()).trim(), "Kept", "Health reads Kept for a kept app");
-  await healthRow.click();
+  await healthRow.getByRole("button", { name: HEALTH_APP, exact: true }).click();
   await appRow.getByRole("button", { name: "Change", exact: true }).click();
   await appRow.locator(`[data-rec="${appRec}"]`).waitFor();
 

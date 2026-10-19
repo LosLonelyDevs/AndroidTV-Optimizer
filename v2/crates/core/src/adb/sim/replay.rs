@@ -448,14 +448,12 @@ pub fn device_from_session(lines: &[SessionLine], serial_hint: Option<&str>) -> 
                     }
                 }
             }
-            ["cmd", "package", "resolve-activity", ..] => {
-                if d.home.preferred.is_none() {
-                    d.home.preferred = out
-                        .lines()
-                        .map(str::trim)
-                        .find(|l| l.contains('/') && !l.contains("ResolverActivity"))
-                        .map(str::to_string);
-                }
+            ["cmd", "package", "resolve-activity", ..] if d.home.preferred.is_none() => {
+                d.home.preferred = out
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| l.contains('/') && !l.contains("ResolverActivity"))
+                    .map(str::to_string);
             }
             // Tweaks greps this down to one line, which is all the
             // simulator ever serves from it, so the line stands in for the dump.

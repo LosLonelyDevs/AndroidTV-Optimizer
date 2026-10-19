@@ -4,6 +4,7 @@
 use serde::Serialize;
 use tauri::State;
 
+use crate::engine::DeviceType;
 use crate::license::Feature;
 
 use super::{is_valid_setting_key, quote_shell_arg, AppState};
@@ -136,7 +137,7 @@ pub struct WriteResult {
 /// Build the `settings` shell command for a write/delete, with the safety
 /// checks that keep a malformed UI request from writing somewhere unexpected
 /// or breaking out of the shell. Pure so it can be unit-tested.
-fn build_setting_command(namespace: &str, key: &str, value: &str) -> Result<String, String> {
+pub fn build_setting_command(namespace: &str, key: &str, value: &str) -> Result<String, String> {
     // Whitelist namespaces.
     if !matches!(namespace, "global" | "secure" | "system") {
         return Err(format!(
@@ -236,8 +237,11 @@ pub enum DisplayScalePreset {
     // frontend's `uhd_4k` / `fhd_1080p` and made every scaling click fail with
     // "unknown variant `uhd_4k`". Keep in lockstep with DisplayScalePreset in
     // src/lib/types.ts.
-    /// 3839x2160 @ density 640. Shield TV won't accept 3840 width, and density
-    /// 540 breaks some app menus (Disney+, HBO) — see issue #24.
+    /// 2160p @ density 640. Width is device-specific (see
+    /// `display_scale_commands`): Shield/Tegra rejects a 3840 width so it uses
+    /// 3839, every other device (incl. the Google TV Streamer 4K) takes the
+    /// native 3840. Density 640 avoids the 540 default that breaks some app
+    /// menus (Disney+, HBO) — see issue #24.
     #[serde(rename = "uhd_4k")]
     Uhd4k,
     /// 1920x1080 @ density 320.
@@ -254,21 +258,57 @@ pub enum DisplayScalePreset {
     Reset,
 }
 
+/// Build the `wm size` + `wm density` commands for a scaling preset. The 4K
+/// preset's width is device-specific: Shield/Tegra silently rejects a 3840
+/// width (it keeps the old size), so Shield uses 3839; every other device —
+/// including the Google TV Streamer 4K — takes the native 3840. The 1080p and
+/// reset presets are identical across devices. Pure so it can be unit-tested.
+fn display_scale_commands(preset: DisplayScalePreset, device_type: DeviceType) -> Vec<String> {
+    match preset {
+        DisplayScalePreset::Uhd4k => {
+            let width = if device_type == DeviceType::Shield {
+                3839
+            } else {
+                3840
+            };
+            vec![
+                format!("wm size {width}x2160"),
+                "wm density 640".to_string(),
+            ]
+        }
+        DisplayScalePreset::Fhd1080p => {
+            vec![
+                "wm size 1920x1080".to_string(),
+                "wm density 320".to_string(),
+            ]
+        }
+        DisplayScalePreset::Reset => {
+            vec!["wm size reset".to_string(), "wm density reset".to_string()]
+        }
+        DisplayScalePreset::Hd720p => {
+            vec!["wm size 1280x720".to_string(), "wm density 213".to_string()]
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn set_display_scaling(
     state: State<'_, AppState>,
     serial: String,
     preset: DisplayScalePreset,
+    device_type: Option<DeviceType>,
 ) -> Result<DisplayScaleResult, String> {
     state.require_pro(Feature::TweaksWrite)?;
-    let adb = state.adb_snapshot().await;
-    let cmds: Vec<&str> = match preset {
-        DisplayScalePreset::Uhd4k => vec!["wm size 3839x2160", "wm density 640"],
-        DisplayScalePreset::Fhd1080p => vec!["wm size 1920x1080", "wm density 320"],
-        DisplayScalePreset::Hd720p => vec!["wm size 1280x720", "wm density 213"],
-        DisplayScalePreset::Reset => vec!["wm size reset", "wm density reset"],
+    let device_type = match device_type {
+        Some(kind) => kind,
+        None => {
+            super::devices::device_profile_impl(state.inner(), &serial)
+                .await?
+                .device_type
+        }
     };
-    let cmd = cmds.join("; ");
+    let adb = state.adb_snapshot().await;
+    let cmd = display_scale_commands(preset, device_type).join("; ");
     let out = adb
         .shell(&serial, &cmd)
         .await
@@ -460,8 +500,10 @@ mod tests {
         build_setting_command, get_tweaks_for, is_valid_dns_hostname, parse_cached_limit,
         BASIC_DAYDREAM_COMPONENT,
     };
+    use super::{display_scale_commands, DisplayScalePreset};
     use crate::adb::{batch::BATCH_STATUS, BATCH_SEPARATOR};
     use crate::commands::test_support::MockAdb;
+    use crate::engine::DeviceType;
 
     fn settings_output(values: &[&str]) -> String {
         values
@@ -556,6 +598,37 @@ mod tests {
             BASIC_DAYDREAM_COMPONENT,
             "com.android.dreams.basic/com.android.dreams.basic.BasicDream"
         );
+    }
+
+    #[test]
+    fn uhd_4k_width_is_device_specific() {
+        // Shield/Tegra needs the 3839 workaround; the Google TV Streamer 4K
+        // takes the native 3840.
+        let shield = display_scale_commands(DisplayScalePreset::Uhd4k, DeviceType::Shield);
+        assert_eq!(shield, ["wm size 3839x2160", "wm density 640"]);
+        let google = display_scale_commands(DisplayScalePreset::Uhd4k, DeviceType::GoogleTv);
+        assert_eq!(google, ["wm size 3840x2160", "wm density 640"]);
+        // Unknown devices get the native width too (only Shield is special-cased).
+        let unknown = display_scale_commands(DisplayScalePreset::Uhd4k, DeviceType::Unknown);
+        assert_eq!(unknown, ["wm size 3840x2160", "wm density 640"]);
+    }
+
+    #[test]
+    fn fhd_and_reset_are_device_agnostic() {
+        for dt in [
+            DeviceType::Shield,
+            DeviceType::GoogleTv,
+            DeviceType::Unknown,
+        ] {
+            assert_eq!(
+                display_scale_commands(DisplayScalePreset::Fhd1080p, dt),
+                ["wm size 1920x1080", "wm density 320"]
+            );
+            assert_eq!(
+                display_scale_commands(DisplayScalePreset::Reset, dt),
+                ["wm size reset", "wm density reset"]
+            );
+        }
     }
 
     #[test]

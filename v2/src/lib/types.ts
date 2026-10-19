@@ -1,5 +1,6 @@
 // TypeScript counterparts of the Rust types in crates/core/src/engine/types.rs
 // and src-tauri/src/commands/*.rs. Keep in sync.
+import type { SurroundMode } from "../../shared/media";
 
 export type ConnectionType = "network" | "usb";
 export type DeviceStatus = "device" | "unauthorized" | "offline";
@@ -9,6 +10,7 @@ export type DeviceType = "shield" | "google_tv" | "unknown";
 export type TvEvidence = "tv" | "not_tv" | "unknown";
 export type ActionMethod = "disable" | "uninstall";
 export type RiskTier = "safe" | "medium" | "high" | "advanced";
+export type OtherPackage = Omit<InstalledPackage, "catalog">;
 
 export interface DeviceProperties {
   friendly_name: string | null;
@@ -65,7 +67,7 @@ export interface AppEntry {
 
 /// When an app was last opened (from dumpsys usagestats).
 export interface AppUsage {
-  /// "YYYY-MM-DD HH:MM:SS" of last use, or null if never opened.
+  /// "YYYY-MM-DD HH:MM:SS" of last use, or null if not opened in the window.
   last_used: string | null;
   launch_count: number;
 }
@@ -77,6 +79,14 @@ export interface AppStorage {
   app_bytes: number | null;
   data_bytes: number | null;
   cache_bytes: number | null;
+}
+
+/// Usage plus the window it was observed over. `window_secs` is device uptime:
+/// `dumpsys usagestats` only reports Android's in-memory buckets, which are
+/// rebuilt at boot, so nothing older than the last reboot exists to report.
+export interface UsageReport {
+  window_secs: number | null;
+  entries: Record<string, AppUsage>;
 }
 
 export interface LauncherEntry {
@@ -221,6 +231,42 @@ export interface StorageInfo {
   used_percent: number | null;
 }
 
+export interface PackageStorage {
+  package: string;
+  app_bytes: number;
+  data_bytes: number;
+  cache_bytes: number;
+  total_bytes: number;
+}
+
+export interface DiskStats {
+  app_bytes: number | null;
+  app_data_bytes: number | null;
+  app_cache_bytes: number | null;
+  photos_bytes: number | null;
+  videos_bytes: number | null;
+  audio_bytes: number | null;
+  downloads_bytes: number | null;
+  system_bytes: number | null;
+  other_bytes: number | null;
+  data_free_bytes: number | null;
+  data_total_bytes: number | null;
+  packages: PackageStorage[];
+}
+
+export interface DiskUsageEntry {
+  path: string;
+  bytes: number;
+  is_dir: boolean;
+}
+
+export interface StorageUsage {
+  path: string;
+  children: DiskUsageEntry[];
+  largest_files: DiskUsageEntry[];
+  total_bytes: number;
+}
+
 export interface HealthReport {
   display: DisplayMode;
   ram: RamInfo;
@@ -228,6 +274,7 @@ export interface HealthReport {
   temperature_c: number | null;
   audio_device: string | null;
   top_memory: MemoryEntry[];
+  disk: DiskStats;
 }
 
 export interface DeviceReport {
@@ -268,7 +315,7 @@ export interface ActionResult {
   message: string;
 }
 
-export interface OtherPackage {
+export interface InstalledPackage {
   package: string;
   system: boolean;
   enabled: boolean;
@@ -277,6 +324,7 @@ export interface OtherPackage {
   /// One line on what the app is, from known-names.json. Display only: the
   /// verdict for these packages stays Unknown.
   description?: string | null;
+  catalog: boolean;
 }
 
 /// `set_home_any` — the Advanced picker. It never disables anything.
@@ -310,6 +358,14 @@ export interface InstallApkResult {
   path: string;
   message: string;
   hint: string | null;
+  /// Package id from the APK's manifest — only read when `downgrade_blocked`,
+  /// which is the one case the UI needs it and may not already have it.
+  package: string | null;
+  /// The install used `adb install -d` (allow downgrade).
+  downgraded: boolean;
+  /// Android refused the downgrade even with `-d`. The only route left is
+  /// uninstall-then-install, which erases the app's data.
+  downgrade_blocked: boolean;
 }
 
 export interface DiscoveredApk {
@@ -317,6 +373,17 @@ export interface DiscoveredApk {
   name: string;
   size_bytes: number;
   package: string | null;
+  /// `versionCode` from the APK manifest — the integer used to compare against
+  /// the installed copy (Upgrade / Downgrade / Reinstall).
+  version_code: number | null;
+  /// `versionName` from the APK manifest — the human version string, display-only.
+  version_name: string | null;
+}
+
+/// The version of a package currently installed on the device.
+export interface InstalledVersion {
+  version_code: number | null;
+  version_name: string | null;
 }
 
 /// What an APK claims about itself, read before anything is installed.
@@ -506,6 +573,87 @@ export interface TweaksState {
 
 export type SettingNamespace = "global" | "secure" | "system";
 
+/// A setting pinned to survive a reboot. Android drops some settings (notably
+/// background_process_limit) back to their default on restart, and the device
+/// can't re-apply them itself — no cron, no root, and Shield ships no
+/// wireless-debugging UI — so the app re-writes them on the next connect.
+export interface BootTweak {
+  namespace: SettingNamespace;
+  key: string;
+  value: string;
+}
+
+export interface ReapplyResult {
+  /// Keys that had drifted and were re-written. Empty when nothing changed.
+  reapplied: string[];
+  ok: boolean;
+  message: string;
+}
+
+export interface SystemInfo {
+  battery_percent: number | null;
+  input_method: string | null;
+  play_protect_enabled: boolean | null;
+  user_rotation: string | null;
+  screen_off_timeout: string | null;
+  location_mode: string | null;
+  developer_options: string | null;
+  doze_enabled: string | null;
+}
+
+export type SystemScreen =
+  | "notification_shade"
+  | "system_updates"
+  | "wifi_settings"
+  | "bluetooth_settings"
+  | "display_settings"
+  | "app_settings"
+  | "developer_options";
+
+export interface ConsoleResult {
+  ok: boolean;
+  output: string;
+}
+
+/// One background-command log entry (Console tab's Activity section).
+export interface ActivityEntry {
+  id: number;
+  /// Milliseconds since the Unix epoch.
+  ts_ms: number;
+  /// "adb" | "scrcpy" — which subsystem ran the command.
+  source: string;
+  command: string;
+  output: string;
+  ok: boolean;
+}
+
+export interface RecordResult {
+  ok: boolean;
+  message: string;
+  path: string | null;
+}
+
+export interface QuickApp {
+  name: string;
+  package: string;
+  description: string;
+  source: string;
+  repo: string | null;
+  asset_match: string | null;
+  /// Pinned release tag (prerelease-only builds); null = latest.
+  tag: string | null;
+  fallback_url: string | null;
+}
+
+export interface QuickAppRow extends QuickApp {
+  installed: boolean;
+}
+
+export interface ShizukuStatus {
+  installed: boolean;
+  running: boolean;
+}
+
 export interface WriteResult {
   ok: boolean;
   message: string;
@@ -551,6 +699,67 @@ export interface PerformanceResult {
   message: string;
 }
 
+// --- Display / Audio wizards + media-app integration (Best Practices 2026) ---
+
+export interface DisplayModeOption {
+  resolution: string;
+  refresh_hz: number;
+  active: boolean;
+}
+
+export interface DisplayReport {
+  current: DisplayMode;
+  supported_modes: DisplayModeOption[];
+  match_content_frame_rate: string | null;
+}
+
+
+export interface AudioFormatRow {
+  id: number;
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
+export interface AudioReport {
+  mode: SurroundMode | null;
+  mode_raw: string | null;
+  formats: AudioFormatRow[];
+  supported_encodings: string[];
+  active_device: string | null;
+}
+
+export interface MediaApps {
+  kodi: boolean;
+  plex: boolean;
+  /// Installed per-app refresh-rate app's package id, if any.
+  refresh_rate_app: string | null;
+}
+
+export type AdjustRefreshRate = "off" | "always" | "on_start_stop" | "on_start";
+
+export interface KodiProfile {
+  adjust_refresh_rate: AdjustRefreshRate;
+  sync_playback_to_display: boolean;
+  hdr_display: boolean;
+  passthrough: boolean;
+  ac3_passthrough: boolean;
+  eac3_passthrough: boolean;
+  dts_passthrough: boolean;
+  truehd_passthrough: boolean;
+  dtshd_passthrough: boolean;
+  ac3_transcode: boolean;
+  resolution_whitelist: string[];
+  whitelist_pulldown: boolean;
+  whitelist_double_refresh: boolean;
+}
+
+export interface StageResult {
+  ok: boolean;
+  message: string;
+  device_path: string;
+}
+
 export function deviceTypeLabel(t: DeviceType): string {
   switch (t) {
     case "shield":
@@ -560,4 +769,30 @@ export function deviceTypeLabel(t: DeviceType): string {
     case "unknown":
       return "Unknown";
   }
+}
+
+/// True when the connected device is the given device-specific class. Used to
+/// gate Shield-only / Google-TV-only config sections. For an Unknown device
+/// (detection failed) this is always false, so device-specific sections hide —
+/// safer than showing controls that may not apply to an unrecognized box.
+export function isDeviceType(t: DeviceType, specificTo: "shield" | "google_tv"): boolean {
+  return t === specificTo;
+}
+
+/// Short noun for the connected device, for inline copy on settings that apply
+/// to both device types (e.g. "lets the Shield power your TV" → device-correct
+/// wording). Falls back to a neutral "device" for Unknown.
+export function deviceNoun(t: DeviceType): string {
+  switch (t) {
+    case "shield":
+      return "Shield";
+    case "google_tv":
+      return "Google TV";
+    case "unknown":
+      return "device";
+  }
+}
+
+export function riskBadgeClass(r: RiskTier): string {
+  return `risk-${r}`;
 }

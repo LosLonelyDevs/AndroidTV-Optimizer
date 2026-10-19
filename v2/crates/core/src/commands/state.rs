@@ -55,6 +55,7 @@ pub struct AppState {
     /// the registry before slow cleanup, so this separate guard prevents a new
     /// server from starting while the old session's broad process cleanup runs.
     remote_transition: Mutex<()>,
+    pub recordings: Mutex<HashMap<String, crate::adb::TrackedChild>>,
 }
 
 impl AppState {
@@ -72,7 +73,26 @@ impl AppState {
             license_info: std::sync::Mutex::new(None),
             remote_sessions: Mutex::new(HashMap::new()),
             remote_transition: Mutex::new(()),
+            recordings: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Is a screen recording in progress for `serial`?
+    pub async fn is_recording(&self, serial: &str) -> bool {
+        self.recordings.lock().await.contains_key(serial)
+    }
+
+    /// Register a started recording child for `serial`.
+    pub async fn insert_recording(&self, serial: &str, child: crate::adb::TrackedChild) {
+        self.recordings
+            .lock()
+            .await
+            .insert(serial.to_string(), child);
+    }
+
+    /// Remove and return the recording child for `serial`, if any.
+    pub async fn take_recording(&self, serial: &str) -> Option<crate::adb::TrackedChild> {
+        self.recordings.lock().await.remove(serial)
     }
 
     /// Attach the curated package→name map. Builder-style so the existing
