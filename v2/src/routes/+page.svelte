@@ -70,6 +70,17 @@
     try { localStorage.setItem(RECENT_NETWORK_KEY, JSON.stringify(recentDevices)); } catch {}
   }
 
+  function clearRecentDevice(recent: RecentDevice) {
+    recentDevices = recentDevices.filter((item) => item.address !== recent.address);
+    saveRecentDevices();
+    try {
+      if (localStorage.getItem(LAST_DEVICE_KEY) === recent.address) {
+        localStorage.removeItem(LAST_DEVICE_KEY);
+      }
+    } catch {}
+    scanMessage = `Cleared ${recent.name} from recent devices.`;
+  }
+
   function rememberNetworkDevices() {
     const connected = devices
       .filter((d) => d.connection === "network" && d.status === "device")
@@ -1313,11 +1324,11 @@
   <section class="recent-devices">
     <div class="recent-header">
       <h2>Recent devices</h2>
-      <p class="muted small">Saved network devices are checked before each local-network scan.</p>
+      <p class="muted small">Saved network devices are checked before each local-network scan. Clear removes a saved address from these automatic checks.</p>
     </div>
     <ul class="device-list">
       {#each disconnectedRecentDevices as recent (recent.address)}
-        <li class="device-row recent-device">
+        <li class="device-row recent-device" data-recent-address={recent.address}>
           <div class="device-main">
             <div class="device-name">
               <span class="conn-tag">[NET]</span>
@@ -1337,6 +1348,13 @@
           >
             {recentBusyAddress === recent.address ? "Connecting…" : "Connect"}
           </button>
+          <button
+            class="small-action"
+            aria-label={`Clear ${recent.name} from recent devices`}
+            title="Remove this saved address. A LAN scan can still discover the device."
+            onclick={() => clearRecentDevice(recent)}
+            disabled={recentBusyAddress !== null || scanBusy || forgetBusy !== null}
+          >Clear</button>
         </li>
       {/each}
     </ul>

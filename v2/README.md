@@ -33,6 +33,13 @@ Expert shell can erase data or make a device unusable. Its obvious-command check
 
 The behavior spec is at [`docs/FEATURES.md`](../docs/FEATURES.md). The ATV Optimizer Android app plan is in [`ATV-OPTIMIZER-ANDROID-PLAN.md`](ATV-OPTIMIZER-ANDROID-PLAN.md).
 
+## Saved devices and settings
+
+- **Recent devices → Clear** removes a saved network address and stops retrying it on startup and refresh. Other saved devices stay intact. A LAN scan can still discover it; paired Wireless debugging devices can also reconnect through ADB until unpaired on the TV.
+- **Settings → Display → Screen Timeout** shows the device's current value and offers two-minute through one-hour presets plus Never. Opening the settings or changing another control does not reset this value. Screensaver timing also depends on the TV's firmware and apps.
+- **Settings → Device** contains Location (GPS), Developer Options, Ambient Display (Doze), Play Protect, and Repair NTP. Doze is distinct from the screensaver selection under Advanced Tweaks.
+- **Overview → Snapshots** saves disabled packages, the current launcher, and supported Android settings, including timeout, screensaver, rotation, location, Doze, developer options, Play Protect, and NTP server. Preview lists the settings and packages to change. Restoring does not re-enable or reinstall apps, restore app data, or undo every device change. Older snapshots restore only what they recorded.
+
 ## Install
 
 Installers for each `v2-*` tag land on [the Releases page](https://github.com/bryanroscoe/shield_optimizer/releases) — `.dmg` for macOS, `.msi` / `.exe` for Windows, `.deb` / `.AppImage` / `.rpm` for Linux. Builds are unsigned; the release body lists the one-time first-launch dismissal steps for each OS.
