@@ -104,6 +104,9 @@
   }
 
   const TIMEOUTS = [
+    { v: "120000", label: "2 min" },
+    { v: "300000", label: "5 min" },
+    { v: "600000", label: "10 min" },
     { v: "900000", label: "15 min" },
     { v: "1800000", label: "30 min" },
     { v: "3600000", label: "1 hour" },
@@ -162,7 +165,7 @@
     </div>
 
     <h3>Screen Timeout</h3>
-    <p class="rec">★ Recommended: <strong>30 min</strong> — video apps hold the screen awake while playing, so this only governs idle time. Pick <em>Never</em> if a screensaver ever interrupts you.</p>
+    <p class="muted small">Idle time before the screen sleeps or the screensaver starts, depending on the device. Video apps can keep the screen awake. The current value is preserved until you choose a timeout here or restore a snapshot that recorded it.</p>
     <div class="tweak-row">
       <div>
         <div class="current">Current: <strong>{timeoutLabel(info.screen_off_timeout)}</strong></div>
@@ -173,7 +176,6 @@
           <button
             class="small-action"
             class:active={info.screen_off_timeout === opt.v}
-            class:recommended={opt.v === "1800000"}
             disabled={busy === "screen_off_timeout"}
             onclick={() => writeSetting("system", "screen_off_timeout", opt.v, "screen_off_timeout")}
           >{opt.label}</button>
