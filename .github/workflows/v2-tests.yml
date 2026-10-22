@@ -80,6 +80,18 @@ jobs:
         working-directory: v2/vendor/adb_client
         run: cargo test --lib
 
+      - name: Windows installer maintenance
+        if: runner.os == 'Windows'
+        working-directory: v2
+        shell: pwsh
+        run: |
+          $env:NSIS_COMPILER = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path -LiteralPath $env:NSIS_COMPILER)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          node tests/installer-maintenance.mjs
+
   frontend:
     name: Frontend type check
     runs-on: ubuntu-latest

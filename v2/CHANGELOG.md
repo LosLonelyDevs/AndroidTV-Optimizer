@@ -20,6 +20,12 @@ this file and shows the newest few sections, dated, from its version button.
 
 ---
 
+## v2-2.3.3 — 2026-10-21
+
+### Fixed
+
+- The Windows EXE installer now honors "Do not uninstall" when an existing MSI installation is detected. It closes setup without launching the uninstaller. The page explains that updating an MSI installation in place requires the MSI installer, and no longer mislabels MSI's encoded version as a newer app version.
+
 ## v2-2.3.2 — 2026-10-21
 
 This fork release includes the desktop integration described under 2.3.1 below,
