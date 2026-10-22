@@ -1,6 +1,6 @@
 # v2 — current state
 
-v2 is a shipping desktop app. Last **published upstream** version: **2.3.0** (2026-09-30). This fork's desktop version is **2.3.2**.
+v2 is a shipping desktop app. Last **published upstream** version: **2.3.0** (2026-09-30). This fork's desktop version is **2.3.3**.
 
 The desktop fork layers its settings groups, unified app table, quick installer,
 recording, storage tools, and per-device risk overrides over the shared Rust core.
@@ -12,7 +12,11 @@ Cargo example (`--features e2e --example e2e_server`) so it cannot enter install
 
 Full release pipeline live: installers built for macOS/Linux/Windows on every `v2-*` tag push via `.github/workflows/v2-release.yml`; macOS also distributed via Homebrew tap (`bryanroscoe/homebrew-shield-optimizer`).
 
-## Fork release 2.3.2
+## Fork release 2.3.3
+
+`v2-2.3.3` fixes the Windows EXE installer's MSI maintenance choice. Declining
+uninstall closes setup; an in-place MSI update uses the MSI installer. The pinned
+NSIS template and its upstream provenance live in `src-tauri/installer/`.
 
 `v2-2.3.2` includes the 2.3.1 desktop fork integration, upstream through `c78176d`,
 recent-device Clear, expanded screen timeouts and snapshot coverage, restored
