@@ -1,6 +1,6 @@
 # v2 — current state
 
-v2 is a shipping desktop app. Last **published upstream** version: **2.3.0** (2026-09-30). This fork's desktop version is **2.3.1**.
+v2 is a shipping desktop app. Last **published upstream** version: **2.3.0** (2026-09-30). This fork's desktop version is **2.3.2**.
 
 The desktop fork layers its settings groups, unified app table, quick installer,
 recording, storage tools, and per-device risk overrides over the shared Rust core.
@@ -12,11 +12,11 @@ Cargo example (`--features e2e --example e2e_server`) so it cannot enter install
 
 Full release pipeline live: installers built for macOS/Linux/Windows on every `v2-*` tag push via `.github/workflows/v2-release.yml`; macOS also distributed via Homebrew tap (`bryanroscoe/homebrew-shield-optimizer`).
 
-## Unreleased on `main`
+## Fork release 2.3.2
 
-`v2-2.3.0` shipped 2026-09-30 (the ATV Optimizer rename plus #88, #119–#124).
-`v2-2.3.1` is prepared in `v2/CHANGELOG.md` (Setup Wraith fixes #122/#157/#158, #97,
-#98, #100, #129 and the rest listed there) and waits on the owner's go to tag.
+`v2-2.3.2` includes the 2.3.1 desktop fork integration, upstream through `c78176d`,
+recent-device Clear, expanded screen timeouts and snapshot coverage, restored
+launcher safeguards, and the E2E fixes. See `v2/CHANGELOG.md` for release notes.
 Things the next reader needs that the code does not say:
 
 - **ADB quit hardening:** PR168 is the implementation authority. See [ADB-QUIT-HARDENING.md](ADB-QUIT-HARDENING.md) for the focused installer regression follow-on, framework limits and preserved historical drafts #174–179.

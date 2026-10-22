@@ -219,6 +219,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.notes.outputs.tag }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -248,9 +250,12 @@ jobs:
           ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run \
             "$workdir/squashfs-root" "$appimage"
 
+          # Repacking changes the signed bytes, so refresh the updater signature.
+          (cd v2 && npx tauri signer sign "../$appimage")
+
           # Replace the unpatched asset tauri-action uploaded. GitHub turns
           # spaces in filenames into dots, so the names match up.
-          gh release upload "$TAG" "$appimage" --clobber
+          gh release upload "$TAG" "$appimage" "$appimage.sig" --clobber
           echo "patched + re-uploaded: $appimage"
 
   # Bump the Homebrew tap (bryanroscoe/homebrew-shield-optimizer) to point at
@@ -368,6 +373,22 @@ jobs:
             sleep 15
           done
           [[ -f /tmp/latest.json ]] || { echo "latest.json not found on release $TAG"; exit 1; }
+
+          gh release download "$TAG" --pattern '*.AppImage.sig' --dir /tmp --clobber
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.parse import unquote, urlparse
+
+          path = Path('/tmp/latest.json')
+          manifest = json.loads(path.read_text())
+          for platform in manifest['platforms'].values():
+              name = unquote(urlparse(platform['url']).path.rsplit('/', 1)[-1])
+              if name.endswith('.AppImage'):
+                  platform['signature'] = (Path('/tmp') / (name + '.sig')).read_text().strip()
+          path.write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+          gh release upload "$TAG" /tmp/latest.json --clobber
 
           cp /tmp/latest.json v2/updater/latest.json
           echo "Updater manifest for $TAG:"
