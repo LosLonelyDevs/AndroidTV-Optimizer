@@ -20,7 +20,10 @@ this file and shows the newest few sections, dated, from its version button.
 
 ---
 
-## Unreleased
+## v2-2.3.2 — 2026-10-21
+
+This fork release includes the desktop integration described under 2.3.1 below,
+plus the latest upstream changes and these fixes.
 
 ### Added
 
@@ -29,6 +32,7 @@ this file and shows the newest few sections, dated, from its version button.
 
 ### Fixed
 
+- Re-sign the Linux AppImage after packaging and publish its final signature in the updater manifest.
 - Add Clear to saved recent devices so removed addresses stop automatic reconnect attempts ([fork issue #1](https://github.com/LosLonelyDevs/shield_optimizer/issues/1)). Add two-, five-, and ten-minute screen timeouts, include desktop device settings in snapshots, and explain restore coverage and limits.
 - Restore canonical device routes after resolving an ADB alias, Setup Wraith warnings and recovery, and the guarded stock-launcher takeover in Settings. Update simulated-device E2E coverage for grouped Settings, snapshot previews, protected controls, kept apps, and fresh post-optimization reports; make the E2E server runnable on Windows.
 - Launcher source pages remain available for installed and current-default launchers. Projectivy links to its official GitHub releases; opening the page never uninstalls or changes the current launcher (#161).
