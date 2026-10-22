@@ -194,7 +194,12 @@ export async function scenarioContext({ browser, base, serverUrl, name, colorSch
       if (tab) await ctx.tab(tab);
     },
     async tab(tab) {
-      await page.locator(`#tab-${tab}`).click();
+      if (tab === "launcher" || ["display", "audio", "input", "system"].includes(tab)) {
+        await page.locator("#tab-settings").click();
+        await page.locator(`#subtab-${tab === "launcher" ? "display" : tab}`).click();
+      } else {
+        await page.locator(`#tab-${tab === "snapshot" ? "overview" : tab}`).click();
+      }
       await page.waitForLoadState("networkidle");
     },
     async device(serial) {

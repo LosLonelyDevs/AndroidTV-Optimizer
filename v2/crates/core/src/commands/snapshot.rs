@@ -707,11 +707,31 @@ mod tests {
     async fn current_settings_map_pairs_keys_to_values_in_order() {
         // tracked_setting_keys order: window/transition/animator scale,
         // 4x hdmi, match_content_frame_rate, long_press_timeout, encoded
-        // surround (2), screensaver_components, screensaver_enabled.
+        // surround (2), screensaver (2), then desktop device settings.
         let mock = MockAdb::default().on_shell(
             "settings get",
             &batched(&[
-                "0.5", "0.5", "0.5", "1", "null", "0", "1", "2", "400", "null", "", "null", "null",
+                "0.5",
+                "0.5",
+                "0.5",
+                "1",
+                "null",
+                "0",
+                "1",
+                "2",
+                "400",
+                "null",
+                "",
+                "null",
+                "null",
+                "120000",
+                "0",
+                "3",
+                "1",
+                "1",
+                "1",
+                "1",
+                "time.example.org",
             ]),
         );
         let map = current_settings_map(&mock, "serial").await.unwrap();
@@ -740,6 +760,18 @@ mod tests {
                 .map(String::as_str),
             Some("")
         );
+        for (key, expected) in [
+            ("system.screen_off_timeout", "120000"),
+            ("system.user_rotation", "0"),
+            ("secure.location_mode", "3"),
+            ("secure.doze_enabled", "1"),
+            ("global.development_settings_enabled", "1"),
+            ("global.package_verifier_enable", "1"),
+            ("global.package_verifier_user_consent", "1"),
+            ("global.ntp_server", "time.example.org"),
+        ] {
+            assert_eq!(map.get(key).map(String::as_str), Some(expected), "{key}");
+        }
     }
 
     #[tokio::test]
@@ -748,6 +780,7 @@ mod tests {
             "settings get",
             &batched(&[
                 "0.5", "0.5", "0.5", "1", "null", "0", "1", "2", "400", "3", "5,6", "null", "null",
+                "null", "null", "null", "null", "null", "null", "null", "null",
             ]),
         );
         let map = current_settings_map(&mock, "serial").await.unwrap();

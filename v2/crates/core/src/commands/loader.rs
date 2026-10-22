@@ -417,6 +417,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn uncurated_shared_package_remains_a_generic_home_handler() {
+        let catalog = load_embedded_launchers().expect("parse");
+        let package = "com.gathin.tvhome".to_string();
+        assert!(!catalog.contains(&package));
+        let missing = crate::engine::launcher_rows(&catalog, &[], &[], &[], &[]);
+        assert!(!missing.iter().any(|row| row.entry.package == package));
+        for disabled in [false, true] {
+            let installed = vec![package.clone()];
+            let disabled_packages = if disabled { installed.clone() } else { vec![] };
+            let handlers = if disabled {
+                vec![]
+            } else {
+                vec![package.clone(), package.clone()]
+            };
+            let rows = crate::engine::launcher_rows(
+                &catalog,
+                &installed,
+                &disabled_packages,
+                &handlers,
+                &installed,
+            );
+            let matching: Vec<_> = rows
+                .iter()
+                .filter(|row| row.entry.package == package)
+                .collect();
+            assert_eq!(matching.len(), 1);
+            let row = matching[0];
+            assert_eq!(row.entry.name, package);
+            assert_eq!(row.entry.source_url, None);
+            assert!(row.installed && row.other);
+            assert!(!row.stock && !row.setup_helper);
+            assert_eq!(row.enabled, !disabled);
+        }
+    }
+
     /// A custom launcher with no source is a row whose "Get" link cannot be
     /// rendered — the only way to install one the device's Play Store lacks.
     #[test]

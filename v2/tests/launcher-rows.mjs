@@ -12,6 +12,7 @@
 // picker and must not reach the launcher list.
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -150,6 +151,71 @@ async function exercise({ browser, base }) {
   );
 }
 
+async function genericHomeStates({ browser, base }) {
+  const packageId = "com.gathin.tvhome";
+  const name = packageId;
+  const evidence = process.env.LAUNCHER_CURATION_EVIDENCE === "1";
+  const dir = join(V2, "evidence/launcher-curation-2026-10-23");
+  if (evidence) await mkdir(dir, { recursive: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, ...(evidence ? { recordVideo: { dir: join(dir, "raw"), size: { width: 1280, height: 900 } } } : {}) });
+  const page = await context.newPage();
+  try {
+    for (const state of ["missing", "installed", "disabled", "current"]) {
+      await page.goto(base, { waitUntil: "networkidle" });
+      await page.evaluate(() => {
+        const original = window.__TAURI_INTERNALS__.invoke;
+        window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+          const result = await original(command, args);
+          const state = window.genericHomeState;
+          if (command === "list_launchers" && state && state !== "missing") return [...result, {
+            entry: { name: "com.gathin.tvhome", package: "com.gathin.tvhome", source_url: null, disable_with: [] },
+            installed: true, enabled: state !== "disabled", stock: false, other: true, setup_helper: false,
+          }];
+          if (command === "current_launcher" && state === "current") return { package: "com.gathin.tvhome", activity: ".MainActivity" };
+          return result;
+        };
+      });
+      await page.evaluate(state => { window.genericHomeState = state; }, state);
+      await page.getByText("NVIDIA SHIELD", { exact: false }).first().click();
+      await page.getByRole("tab", { name: "Launcher" }).click();
+      const row = page.locator(".launcher-list li").filter({ has: page.locator(".launcher-pkg", { hasText: packageId }) });
+      await page.locator(".launcher-list li").first().waitFor();
+      if (state === "missing") {
+        assert.equal(await row.count(), 0, "uncurated missing packages have no recommendation");
+      } else {
+        await row.waitFor();
+        assert.equal(await row.count(), 1);
+        assert.equal(await row.locator(".launcher-name").innerText(), name);
+        const tags = await row.locator(".tag").allTextContents();
+        assert.equal(tags.includes("MISSING"), state === "missing");
+        assert.equal(tags.includes("INSTALLED"), false);
+        assert.equal(tags.includes("DISABLED"), state === "disabled");
+        assert.equal(tags.includes("ACTIVE"), state === "current");
+        assert.equal(tags.includes("HOME APP"), true);
+        assert.equal(await row.getByRole("button", { name: "Enable", exact: true }).count(), state === "disabled" ? 1 : 0);
+        assert.equal(await row.getByRole("button", { name: "Set as default", exact: true }).count(), state === "installed" ? 1 : 0);
+        assert.equal(await row.getByRole("button", { name: "Enable & set default", exact: true }).count(), state === "disabled" ? 1 : 0);
+        assert.equal(await row.locator(".current-default").count(), state === "current" ? 1 : 0);
+        assert.equal(await row.getByRole("button", { name: /Open the developer/ }).count(), 0);
+      }
+      if (evidence) {
+        if (state !== "missing") await row.scrollIntoViewIfNeeded();
+        await page.evaluate(state => {
+          const label = document.createElement("div"); label.textContent = `SIMULATED CATALOG STATE: ${state} — no real device`;
+          label.style.cssText = "position:fixed;top:0;right:0;z-index:99999;padding:8px;background:#1a2540;color:white;font:14px sans-serif";
+          document.body.appendChild(label);
+        }, state);
+        await page.screenshot({ path: join(dir, `${state}-simulated.png`), animations: "disabled" });
+        await page.waitForTimeout(650);
+      }
+    }
+    const video = page.video();
+    await context.close();
+    if (evidence) await video.saveAs(join(dir, "launcher-states-simulated.webm"));
+  } finally { await context.close(); }
+  console.log("Uncurated package: absent recommendation and generic installed/disabled/current HOME states pass.");
+}
+
 async function main() {
   const restore = setHarnessEnvironment();
   let server, browser;
@@ -160,6 +226,7 @@ async function main() {
     await server.listen();
     browser = await chromium.launch();
     await exercise({ browser, base: serverURL(server) });
+    await genericHomeStates({ browser, base: serverURL(server) });
   } finally {
     await browser?.close().catch((e) => console.error("browser cleanup failed", e));
     await server?.close().catch((e) => console.error("Vite cleanup failed", e));

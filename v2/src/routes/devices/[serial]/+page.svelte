@@ -143,6 +143,23 @@
   let homePickerChoice = $state("");
   let homePickerMessage = $state("");
   let stockConfirmTarget = $state<string | null>(null);
+  let stockHoldsHomeFor = $state<string | null>(null);
+  let launcherDiagnostics = $state<string[]>([]);
+  const setupHelper = $derived(launchers.find((l) => l.setup_helper && l.installed) ?? null);
+  const stockEnabled = $derived(launchers.some((l) => l.stock && l.enabled));
+  const setupHelperState = $derived(
+    !setupHelper ? null : !setupHelper.enabled ? "off" : stockEnabled ? "on" : "risk",
+  );
+  const takeoverTurnsOffSetupHelper = $derived(
+    !!setupHelper?.enabled && launchers.some(
+      (l) => l.stock && l.enabled && (l.entry.disable_with ?? []).includes(setupHelper.entry.package),
+    ),
+  );
+  const canDisableStock = $derived(
+    !!homePickerChoice && stockEnabled &&
+    !launchers.some((l) => l.stock && l.entry.package === homePickerChoice) &&
+    (currentLauncher?.package === homePickerChoice || stockHoldsHomeFor === homePickerChoice),
+  );
 
   let apps = $state<AppEntry[]>([]);
   let appsLoaded = $state(false);
@@ -316,9 +333,16 @@
   let optimizeResetToken = $state(0);
 
   async function loadDevice() {
+    const requestedSerial = serial;
     deviceErr = null;
     try {
-      device = await api.deviceProfile(serial);
+      const profile = await api.deviceProfile(requestedSerial);
+      if (serial !== requestedSerial) return;
+      if (profile.serial !== requestedSerial) {
+        await goto(`/devices/${encodeURIComponent(profile.serial)}`, { replaceState: true });
+        return;
+      }
+      device = profile;
       // Remember the device we're actively on so the next app launch can
       // reconnect and reopen it. Keyed on serial (== ip:port for network
       // devices) — exactly what the home page navigates back to.
@@ -326,7 +350,7 @@
         localStorage.setItem("shieldopt.lastDeviceSerial", serial);
       }
     } catch (e) {
-      deviceErr = String(e);
+      if (serial === requestedSerial) deviceErr = String(e);
     }
   }
 
@@ -1068,27 +1092,65 @@ This is permanent — there is no trash on Android.`)) return;
   async function setAnyHome() {
     if (!homePickerChoice || launcherActionBusy) return;
     launcherActionBusy = homePickerChoice;
+    stockConfirmTarget = null;
+    homePickerMessage = "";
+    stockHoldsHomeFor = null;
+    launcherDiagnostics = [];
     try {
       const result = await api.setHomeAny(serial, homePickerChoice);
       homePickerMessage = result.message;
+      stockHoldsHomeFor = result.stock_holds_home ? homePickerChoice : null;
+      launcherDiagnostics = result.ok ? [] : result.diagnostics;
       await loadLauncher();
       invalidateDeviceCaches();
     } catch (e) { homePickerMessage = String(e); }
     finally { launcherActionBusy = null; }
   }
 
-  async function disableStockFromPicker() {
+  async function disableStockFromPicker(saveFirst = false) {
     const target = stockConfirmTarget;
     if (!target || launcherActionBusy) return;
     stockConfirmTarget = null;
     launcherActionBusy = target;
     try {
+      if (saveFirst) {
+        await saveSnapshot();
+        if (!saveResult.startsWith("Saved")) {
+          homePickerMessage = "The snapshot wasn't saved, so the stock launcher was left alone.";
+          return;
+        }
+      }
+      const helperNote = takeoverTurnsOffSetupHelper
+        ? " Google TV's setup helper (Setup Wraith) was turned off too."
+        : "";
       const result = await api.disableStockLauncher(serial, target);
-      homePickerMessage = result.ok ? "Stock launcher disabled; the selected app holds Home." : result.last_error ?? "Could not confirm the launcher change.";
+      homePickerMessage = result.ok
+        ? `The stock launcher is disabled and ${target} is Home.${helperNote} Re-enable stock from the list above any time.`
+        : result.last_error ?? "Could not confirm the launcher change.";
+      launcherDiagnostics = result.ok ? [] : result.diagnostics;
+      stockHoldsHomeFor = null;
       await loadLauncher();
       await resyncAfterBulkChange();
     } catch (e) { homePickerMessage = String(e); }
     finally { launcherActionBusy = null; }
+  }
+
+  async function turnOffSetupHelper() {
+    if (!setupHelper || launcherActionBusy) return;
+    launcherActionBusy = setupHelper.entry.package;
+    launcherActionMessage = "";
+    try {
+      const result = await api.disableSetupHelper(serial, setupHelper.entry.package);
+      launcherActionMessage = result.ok
+        ? "Setup Wraith is off. Press Home on the TV to check it lands on your launcher."
+        : `Couldn't turn off Setup Wraith: ${result.message}`;
+      await loadLauncher();
+      invalidateDeviceCaches();
+    } catch (e) {
+      launcherActionMessage = String(e);
+    } finally {
+      launcherActionBusy = null;
+    }
   }
 
   async function enableLauncher(pkg: string) {
@@ -1493,6 +1555,8 @@ This is permanent — there is no trash on Android.`)) return;
   /// so this is defensive — but it guarantees no device's data or in-flight
   /// timer can leak onto another if a device→device link is ever added).
   function resetDeviceState() {
+    homePickerPackages = []; homePickerChoice = ""; homePickerMessage = "";
+    stockConfirmTarget = null; stockHoldsHomeFor = null; launcherDiagnostics = [];
     if (liveRefreshTimer) {
       clearInterval(liveRefreshTimer);
       liveRefreshTimer = null;
@@ -1766,6 +1830,13 @@ This is permanent — there is no trash on Android.`)) return;
           {saveBusy ? "Saving…" : "Save current state"}
         </button>
       </div>
+      <p class="muted small">
+        Saves disabled packages, the current launcher, and supported Android settings,
+        including screen timeout and screensaver settings. Restore disables recorded
+        packages and restores those settings; it does not re-enable or reinstall apps,
+        restore app data, or undo every device change. Preview the changes before applying.
+        Older snapshots only restore the settings they recorded.
+      </p>
       {#if saveResult}<p class="muted small">{saveResult}</p>{/if}
       {#if snapshotsErr}<div class="error">{snapshotsErr}</div>{/if}
       {#if snapshots.length === 0}
@@ -1808,6 +1879,9 @@ This is permanent — there is no trash on Android.`)) return;
             <thead><tr><th>Setting</th><th>Now</th><th>After restore</th></tr></thead>
             <tbody>
               <tr data-plan-item="launcher" class:plan-noop={!preview.launcher_to_set}><td>Launcher</td><td>{preview.current_launcher ?? "Unknown"}</td><td>{preview.launcher_to_set ?? "Unchanged"}</td></tr>
+              {#each preview.packages_to_disable as pkg (pkg)}
+                <tr><td>{pkg}</td><td>Enabled</td><td>Disabled</td></tr>
+              {/each}
               {#each [...new Set([...Object.keys(preview.settings_to_write), ...preview.settings_already_set, ...preview.settings_to_delete])] as key (key)}
                 <tr class:plan-noop={preview.settings_already_set.includes(key)}><td>{key}</td><td>{preview.current_values[key] === "" ? "(empty)" : preview.current_values[key] ?? "(unset)"}</td><td>{preview.settings_to_delete.includes(key) ? "(unset)" : preview.settings_to_write[key] ?? preview.current_values[key] ?? "(unset)"}</td></tr>
               {/each}
@@ -2547,7 +2621,7 @@ This is permanent — there is no trash on Android.`)) return;
       <TweaksTab {serial} deviceType={device.device_type} group="display" />
       <SystemTab {serial} group="display" />
 
-      <div class="card section-card">
+      <div class="card section-card" id="launcher-section">
         <div class="card-header">
           <h2>Launchers</h2>
           <button onclick={loadLauncher} disabled={launcherLoading}>
@@ -2558,7 +2632,7 @@ This is permanent — there is no trash on Android.`)) return;
           <div class="error">{launcherErr}</div>
         {:else}
           {#if currentLauncher?.package}
-            <p>Currently active: <strong>{currentLauncher.package}</strong></p>
+            <p class="launcher-foot">Current home app: <strong class="foot-value">{currentLauncher.package}</strong></p>
           {/if}
           {#if channelDisabled}
             <div class="warning">
@@ -2627,7 +2701,7 @@ This is permanent — there is no trash on Android.`)) return;
                           {busy ? "Enabling…" : "Enable"}
                         </button>
                       {/if}
-                      {#if !isCurrent}
+                      {#if !isCurrent && !l.setup_helper}
                         <button
                           class="primary small-action"
                           onclick={() => setDefaultLauncher(l.entry.package)}
@@ -2659,20 +2733,42 @@ This is permanent — there is no trash on Android.`)) return;
                 </li>
               {/each}
             </ul>
+            {#if setupHelper && setupHelperState}
+              <div class="warning setup-helper-callout" role="status" data-setup-helper={setupHelperState}>
+                {#if setupHelperState === "off"}
+                  <p>Setup Wraith is off. Turn this back on if Google asks you to sign in again or you need to pair a remote; turn it off again after.</p>
+                  <button class="small-action" onclick={() => enableLauncher(setupHelper.entry.package)} disabled={launcherActionBusy !== null}>Re-enable Setup Wraith</button>
+                {:else if setupHelperState === "on"}
+                  <p>Google TV's setup helper (Setup Wraith) is on. It can take the Home button back after you switch launchers. Disable stock launcher turns it off too.</p>
+                {:else}
+                  <p>Google TV's setup helper (Setup Wraith) is on while the stock launcher is off. It will likely grab the Home button.</p>
+                  <button class="small-action" onclick={turnOffSetupHelper} disabled={launcherActionBusy !== null}>Turn it off</button>
+                {/if}
+              </div>
+            {/if}
             {#if launcherActionMessage}
               <p class="muted small mono action-message">{launcherActionMessage}</p>
             {/if}
             <details class="home-picker" ontoggle={(e) => { if (e.currentTarget.open) void loadHomePicker(); }}>
-              <summary>Advanced: choose any installed app</summary>
-              <label>App to set as Home <select bind:value={homePickerChoice} disabled={launcherActionBusy !== null}>{#each homePickerPackages as app (app.package)}<option value={app.package}>{app.name ?? app.package}</option>{/each}</select></label>
-              <button onclick={setAnyHome} disabled={!homePickerChoice || launcherActionBusy !== null}>Set as Home</button>
-              <button onclick={() => stockConfirmTarget = homePickerChoice} disabled={!homePickerChoice || currentLauncher?.package !== homePickerChoice || launcherActionBusy !== null}>Disable stock launcher</button>
-              {#if homePickerMessage}<p class="muted small">{homePickerMessage}</p>{/if}
+              <summary>Advanced: set another app as Home…</summary>
+              <p class="muted small">Setting an app as Home never disables anything. If Android reports that stock still holds Home, the separate takeover step can disable stock and verify the replacement.</p>
+              <div class="home-picker-row row-actions">
+                <label>App to set as Home <select bind:value={homePickerChoice} disabled={launcherActionBusy !== null} onchange={() => { homePickerMessage = ""; stockConfirmTarget = null; stockHoldsHomeFor = null; launcherDiagnostics = []; }}>{#each homePickerPackages as app (app.package)}<option value={app.package}>{app.name ?? app.package}</option>{/each}</select></label>
+                <button onclick={setAnyHome} disabled={!homePickerChoice || launcherActionBusy !== null}>Set as Home</button>
+                <button onclick={() => stockConfirmTarget = homePickerChoice} disabled={!canDisableStock || launcherActionBusy !== null}>Disable stock launcher</button>
+              </div>
+              {#if homePickerMessage}<p class="muted small home-picker-result" role="status">{homePickerMessage}</p>{/if}
+              {#if launcherDiagnostics.length > 0}
+                <details><summary>Launcher diagnostics</summary><pre>{launcherDiagnostics.join("\n")}</pre></details>
+              {/if}
               {#if stockConfirmTarget}
-                <div class="warning" role="alertdialog" aria-label="Confirm disabling the stock launcher">
-                  <p>Disable the stock launcher only after {stockConfirmTarget} holds Home. Save a snapshot first so you can restore the current setup.</p>
-                  <button onclick={saveSnapshot} disabled={saveBusy}>Save snapshot first</button>
-                  <button onclick={disableStockFromPicker} disabled={launcherActionBusy !== null}>Disable stock launcher</button>
+                <div class="warning home-picker-confirm" role="alertdialog" aria-label="Confirm disabling the stock launcher">
+                  <p>Disable the stock launcher and hand Home to {stockConfirmTarget}? If Home doesn't land on it, the stock launcher is re-enabled straight away. You can re-enable it from the list above at any time.</p>
+                  {#if takeoverTurnsOffSetupHelper}
+                    <p>Also turns off Google TV's setup helper (Setup Wraith), or it takes the Home button back. You may need to turn it back on briefly to sign in to Google again or pair a remote.</p>
+                  {/if}
+                  <button onclick={() => disableStockFromPicker(true)} disabled={saveBusy || launcherActionBusy !== null}>Save snapshot first</button>
+                  <button onclick={() => disableStockFromPicker()} disabled={launcherActionBusy !== null}>Disable stock launcher</button>
                   <button onclick={() => stockConfirmTarget = null}>Cancel</button>
                 </div>
               {/if}
