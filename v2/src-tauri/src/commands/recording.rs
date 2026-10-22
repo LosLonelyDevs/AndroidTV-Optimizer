@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn flattens_serial_for_filenames() {
-        assert_eq!(filename_safe("192.168.1.5:5555"), "192-168-1-5-5555");
+        assert_eq!(filename_safe("192.0.2.5:5555"), "192-0-2-5-5555");
     }
 
     #[tokio::test]
