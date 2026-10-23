@@ -72,7 +72,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             v2/target
-          key: ${{ runner.os }}-cargo-v2-release-${{ hashFiles('v2/Cargo.lock') }}
+          key: ${{ github.repository }}-${{ runner.os }}-cargo-v2-release-${{ hashFiles('v2/Cargo.lock') }}
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-22.04'

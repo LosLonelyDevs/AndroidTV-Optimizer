@@ -166,7 +166,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             v2/target
-          key: ${{ runner.os }}-cargo-v2-release-${{ hashFiles('v2/Cargo.lock') }}
+          key: ${{ github.repository }}-${{ runner.os }}-cargo-v2-release-${{ hashFiles('v2/Cargo.lock') }}
 
       # Tauri's bundler on Linux needs webkit2gtk and friends. Pinning to
       # 22.04 because 24.04 ships libwebkit2gtk-4.1 only under a slightly
