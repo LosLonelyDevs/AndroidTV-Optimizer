@@ -177,7 +177,8 @@ async function genericHomeStates({ browser, base }) {
       });
       await page.evaluate(state => { window.genericHomeState = state; }, state);
       await page.getByText("NVIDIA SHIELD", { exact: false }).first().click();
-      await page.getByRole("tab", { name: "Launcher" }).click();
+      await page.getByRole("tab", { name: "Settings", exact: true }).click();
+      await page.locator("#subtab-display").click();
       const row = page.locator(".launcher-list li").filter({ has: page.locator(".launcher-pkg", { hasText: packageId }) });
       await page.locator(".launcher-list li").first().waitFor();
       if (state === "missing") {
@@ -185,7 +186,7 @@ async function genericHomeStates({ browser, base }) {
       } else {
         await row.waitFor();
         assert.equal(await row.count(), 1);
-        assert.equal(await row.locator(".launcher-name").innerText(), name);
+        assert.equal(await row.locator(".launcher-name").innerText(), state === "current" ? `${name} ACTIVE` : name);
         const tags = await row.locator(".tag").allTextContents();
         assert.equal(tags.includes("MISSING"), state === "missing");
         assert.equal(tags.includes("INSTALLED"), false);
