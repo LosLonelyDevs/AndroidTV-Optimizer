@@ -2,6 +2,8 @@
 
 A ground-up rewrite of Shield Optimizer as a **native installable desktop app** with **built-in auto-update** and a **mobile companion** (`mobile/`) — replacing the v1 PowerShell script while preserving every behavior catalogued in [`docs/FEATURES.md`](../docs/FEATURES.md).
 
+**This desktop fork adds** recording and mirroring, automated app installs and Shizuku setup, expanded audio/Kodi controls, remembered device settings, and deeper app/storage tools. See [What this fork adds](../README.md#what-this-fork-adds) for highlights or the [full comparison with upstream](../docs/FORK-DIFFERENCES-2026-10-22.md). [Download the fork's installers](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases).
+
 <img alt="ATV Optimizer v2 walkthrough (dark)" src="screenshots/gallery.gif" />
 
 <details>
@@ -17,17 +19,17 @@ This directory is the v2 workspace. v1 (`Shield-Optimizer.ps1` at the repo root)
 
 ## Status
 
-✅ **Shipping — v2-2.1.0.** Full feature set landed. v2 currently:
+**Current fork desktop version: 2.3.3.** v2 currently:
 
 - Builds: `cargo build -p shield-optimizer-v2` and `npm run build` both produce artifacts
 - Tests: Rust tests (engine + ADB parsers + loader sanity), all passing
-- Runs as an installable desktop app (`npm run tauri dev` for dev; download from [Releases](https://github.com/bryanroscoe/shield_optimizer/releases) or `brew install --cask shield-optimizer`)
+- Runs as an installable desktop app (`npm run tauri dev` for dev; download from [this fork's Releases](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases))
 - Lists ADB devices with friendly model names + device-type detection
 - Full device management: profile, health report, launcher wizard (install/request default/guarded stock disable where firmware permits), optimize wizard with per-app defaults, full app list with disable/enable/force-stop/uninstall, Tweaks (HDMI-CEC, animations, display scaling), APK sideload, APK backup and cross-device clone, file manager, device screenshots, reboot + recovery, and snapshot save/preview/apply
 
 **Launcher compatibility:** device detection and a launcher catalog entry do not guarantee that firmware accepts Home changes. Some Fire TV builds reject changing protected Amazon stock packages; even the precautionary re-enable can be rejected. Failures retain raw diagnostics, a separate restore outcome and the final Home readback. No firmware-protection bypass is provided, and a successful command is not itself proof of the final Home app. [Issue #205](https://github.com/bryanroscoe/shield_optimizer/issues/205) remains unverified on hardware pending reporter version/build information. This shared-core behavior applies to desktop and mobile once each branch includes the fix.
 
-**Remaining feature gaps vs. aTV Tools:** see [`ATVTOOLS-PARITY.md`](ATVTOOLS-PARITY.md). Screen recording and a permissions viewer remain unimplemented. The unreleased desktop adds playback configuration reports, CPU/per-interface network samples, and an opt-in expert shell. Playback and resource reports plus audio policy controls are also available in the mobile companion; mobile does not expose arbitrary shell.
+**Feature comparison with aTV Tools:** see [`ATVTOOLS-PARITY.md`](ATVTOOLS-PARITY.md). Screen recording is implemented in this desktop fork; physical-device validation remains pending. Desktop also includes playback configuration reports, CPU/per-interface network samples, and an opt-in expert shell. Playback and resource reports plus audio policy controls are also available in the mobile companion; mobile does not expose arbitrary shell.
 
 Expert shell can erase data or make a device unusable. Its obvious-command checks are not a security boundary. Execution stops the local ADB client after 30 seconds or 256 KiB from either output stream, which does not guarantee remote work has stopped. Saved bookmarks stay in local app preferences; commands and output are not added to diagnostics logs.
 
@@ -42,16 +44,16 @@ The behavior spec is at [`docs/FEATURES.md`](../docs/FEATURES.md). The ATV Optim
 
 ## Install
 
-Installers for each `v2-*` tag land on [the Releases page](https://github.com/bryanroscoe/shield_optimizer/releases) — `.dmg` for macOS, `.msi` / `.exe` for Windows, `.deb` / `.AppImage` / `.rpm` for Linux. Builds are unsigned; the release body lists the one-time first-launch dismissal steps for each OS.
+Installers for each `v2-*` tag land on [this fork's Releases page](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases) — `.dmg` for macOS, `.msi` / `.exe` for Windows, `.deb` / `.AppImage` / `.rpm` for Linux. Builds are unsigned; the release body lists the one-time first-launch dismissal steps for each OS.
 
-**macOS users: install via Homebrew** to skip the Gatekeeper dance entirely:
+**Upstream macOS build via Homebrew:** this installs upstream ATV Optimizer, without this fork's additions. Use the installers above for the fork.
 
 ```sh
 brew tap bryanroscoe/shield-optimizer
 brew install --cask shield-optimizer
 ```
 
-The cask strips the quarantine bit in a postflight, so the app opens with a normal double-click — no `xattr`, no Settings dance. Upgrades follow with `brew upgrade --cask shield-optimizer`. The tap is auto-bumped by [the release workflow](../.github/workflows/v2-release.yml) on every `v2-*` tag push.
+The cask strips the quarantine bit in a postflight, so the app opens with a normal double-click — no `xattr`, no Settings dance. Upgrades follow with `brew upgrade --cask shield-optimizer`. The tap tracks upstream releases.
 
 ## Technology choices
 

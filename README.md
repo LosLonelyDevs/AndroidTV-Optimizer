@@ -4,6 +4,18 @@ Debloat and tune Android TV devices — disable bloat, switch launchers, sideloa
 
 **Fire TV compatibility is build-dependent.** Some Fire OS builds reject changes to the protected Amazon stock launcher, including attempts to re-enable it. Recognizing Projectivy or another supported launcher does not establish that the firmware permits changing Home or disabling stock. The app reports the command error, precautionary restore outcome and actual Home readback separately; it does not bypass firmware protection. See [issue #205](https://github.com/bryanroscoe/shield_optimizer/issues/205) for a Toshiba Fire TV report still awaiting version/build details.
 
+## What this fork adds
+
+This is the **LosLonelyDevs desktop fork** of [ATV Optimizer](https://github.com/bryanroscoe/shield_optimizer). It builds on upstream's optimizer, device management, and safety checks with:
+
+- **Screen recording and mirroring:** save a TV recording to your computer or open a separate scrcpy mirror window.
+- **Easier app setup:** automatically download and install ABI-matched APKs from a curated catalog, set up Shizuku, and see upgrade/downgrade/reinstall labels for local APKs.
+- **More playback controls:** choose individual surround codecs, inspect receiver-reported formats, and generate a Kodi configuration for manual import.
+- **Remembered devices and settings:** reconnect to saved TVs, clear individual saved addresses, reapply a pinned background-process limit on connection, and capture more settings in snapshots.
+- **Deeper app and storage tools:** clear an app's cache or data, find large files, get usage recommendations that account for recent reboots, and set per-device risk overrides that retain protected-package blocks.
+
+These additions are in **v2 desktop**. [Download this fork](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases) or read the [detailed fork/upstream comparison](docs/FORK-DIFFERENCES-2026-10-22.md), including the Windows MSI maintenance fix and source links.
+
 ## Which version should I use?
 
 There are two ways to run it. Pick one — you only need to read that version's section.
@@ -46,7 +58,19 @@ A native desktop app — no PowerShell, no terminal, no scripting. It bundles it
 
 ## Install
 
-### macOS — Homebrew (easiest)
+### Any platform — download this fork
+
+Grab the latest `v2-*` installer from this fork's [**Releases page**](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases):
+
+| OS | File |
+|----|------|
+| Windows | `.msi` or `_x64-setup.exe` |
+| macOS | `_universal.dmg` (Apple Silicon + Intel) |
+| Linux | `.AppImage`, `.deb`, or `.rpm` |
+
+### macOS — upstream via Homebrew
+
+This tap installs **upstream ATV Optimizer**, without this fork's additions. Use the installers above for the features listed under “What this fork adds.”
 
 ```sh
 brew tap bryanroscoe/shield-optimizer
@@ -54,16 +78,6 @@ brew install --cask shield-optimizer
 ```
 
 Homebrew strips the macOS quarantine flag for you, so the app opens with a normal double-click. Upgrade later with `brew upgrade --cask shield-optimizer`.
-
-### Any platform — download an installer
-
-Grab the latest from the [**Releases page**](https://github.com/bryanroscoe/shield_optimizer/releases) (current builds are tagged `v2-…` and marked *pre-release* during the beta):
-
-| OS | File |
-|----|------|
-| Windows | `.msi` or `_x64-setup.exe` |
-| macOS | `_universal.dmg` (Apple Silicon + Intel) |
-| Linux | `.AppImage`, `.deb`, or `.rpm` |
 
 ### First launch (unsigned builds)
 
@@ -90,13 +104,14 @@ There is no minimum or maximum Android version. If a device is not showing up, i
 | **Overview** | Device profile — model, Android version, build, hardware ID. |
 | **Health** | Temperature, CPU and network sampling, RAM and storage meters, display mode + HDR, audio, and the top memory consumers (with safety verdicts). |
 | **Playback** | What the TV is actually outputting — resolution, refresh, HDR and audio passthrough. |
-| **Launcher** | Install supported launchers, request a default, and explicitly confirm a guarded stock-launcher disable where the firmware permits it. |
+| **Settings** | Display, Audio, Input, and Device controls. Launcher management is under Display, including guarded stock-launcher disable where the firmware permits it. |
 | **App List** | Per-app Disable / Enable / Uninstall, or install via the Play Store. |
 | **Optimize** | The debloat wizard — review each app's recommended action with its RAM usage, untick anything you want to keep, then **Run**. Reversible via Restore. |
 | **Tweaks** | HDMI-CEC, match-content frame rate, long-press timeout, animation speed, display scaling, audio passthrough. |
 | **Remote** | An on-screen D-pad and live typing, over a low-latency channel. Paste a long URL or password instead of typing it. |
 | **Files** | Browse `/sdcard`, pull files to this computer, upload, and find an app's exported backups. |
-| **Install APK** | Sideload an `.apk` from a folder. |
+| **Install APK** | Sideload local APKs with version-aware labels, or download and install from the quick-install catalog. |
+| **Console** | Run ADB shell commands and inspect background ADB/scrcpy activity. |
 | **Snapshot** | Save a device's state and re-apply it later — to the same device (rollback) or a different one (clone). |
 | **Shell** | Run an ADB shell command directly, for anything the UI doesn't cover. |
 
@@ -110,7 +125,7 @@ Building from source / contributing? See [`v2/README.md`](v2/README.md).
 
 <img alt="v1 screenshot gallery" src="screenshots/gallery.gif" />
 
-The original cross-platform PowerShell tool. Same features, terminal UI. Requires **PowerShell 7+**.
+The original cross-platform PowerShell tool for core optimization and device management. The desktop additions listed above are specific to v2. Requires **PowerShell 7+**.
 
 ## Install PowerShell 7 + get the script
 
