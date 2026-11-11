@@ -24,6 +24,7 @@ pub mod media_apps;
 pub mod mirror;
 pub mod quick_install;
 pub mod quit;
+pub mod ram;
 pub mod recording;
 pub mod safety_overrides;
 pub mod scan;

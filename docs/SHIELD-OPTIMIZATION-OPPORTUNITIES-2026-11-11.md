@@ -4,6 +4,8 @@ Research date: 2026-11-11. Scope: the desktop fork rebased onto upstream `9bb838
 
 **Updated priority: RAM utilization.** The requested next feature is a [RAM optimization workflow](SHIELD-RAM-OPTIMIZATION-PROPOSAL-2026-11-11.md): identify persistent background consumers, offer reversible per-app background restrictions, and measure whether the change reduces memory pressure. This adds a control between closing an app and disabling it entirely. Its effect on Shield firmware still needs physical validation.
 
+Implementation status: the [desktop RAM workflow](RAM-WORKFLOW.md) now includes bounded before/after memory sessions, background restrictions with undo, and matched app-launch benchmarks. The remaining opportunities below are research proposals.
+
 The broader **Find my bottleneck** flow remains useful: measure the problem, offer one relevant change, then repeat the measurement. The general-purpose opportunities below address streaming paths, unnecessary transcoding, and slow storage; their ranking does not override the RAM priority above.
 
 ## What the app already covers

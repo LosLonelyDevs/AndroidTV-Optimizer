@@ -264,6 +264,7 @@ impl Server {
                         "uninstalled": pick(&|p| !p.installed),
                     },
                     "settings": d.settings,
+                    "appops": d.appops,
                     "home": {
                         "resolved": probe.resolve_home(&stock),
                         "preferred": d.home.preferred,
@@ -403,6 +404,30 @@ impl Server {
                 let serial = field("serial").ok_or("missing serial")?;
                 let mut w = self.sim.world();
                 let d = w.devices.get_mut(&serial).ok_or("no such device")?;
+                if let Some(texts) = body.get("texts") {
+                    let texts: BTreeMap<String, String> =
+                        serde_json::from_value(texts.clone()).map_err(|e| e.to_string())?;
+                    d.texts.extend(texts);
+                }
+                if let Some(apps) = body.get("user_apps").and_then(Value::as_array) {
+                    for app in apps {
+                        let name = app.as_str().ok_or("invalid app name")?;
+                        if let Some((_, package)) = d.packages.iter_mut().find(|(p, _)| p == name) {
+                            package.system = false;
+                            package.enabled = true;
+                            package.installed = true;
+                        } else {
+                            d.packages.push((
+                                name.into(),
+                                sim::Package {
+                                    system: false,
+                                    enabled: true,
+                                    installed: true,
+                                },
+                            ));
+                        }
+                    }
+                }
                 if let Some(v) = body.get("authorized").and_then(Value::as_bool) {
                     d.authorized = v;
                 }

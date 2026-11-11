@@ -2,6 +2,8 @@
 
 Research date: 2026-11-11. Source audit: desktop fork 2.6.0 at `8709ac73`. Proposal only; no Shield settings changed and no RAM savings measured.
 
+Implementation follow-up: the desktop now has the [RAM workflow and launch benchmark](RAM-WORKFLOW.md). The design below remains the original research proposal. The delivered scope uses bounded session samples; OS `procstats` history and restart/kill-cause attribution remain follow-up work. Physical Shield effectiveness is still unverified.
+
 ## Recommended feature
 
 Add **Reduce background RAM**: find apps that consume memory while unused, offer a reversible restriction on their background work, and verify the result during the same playback/app-switching workload.

@@ -337,7 +337,7 @@ impl Device {
             .rfind(|a| !a.starts_with('-') && *a != "0");
         let has = |f: &str| flags.contains(&f);
         let mut out = String::new();
-        for (name, p) in &self.packages {
+        for (index, (name, p)) in self.packages.iter().enumerate() {
             if !p.installed && !has("-u") {
                 continue;
             }
@@ -360,6 +360,8 @@ impl Device {
             }
             if has("-f") {
                 out.push_str(&format!("package:{}={name}\n", apk_path(name, p)));
+            } else if has("-U") {
+                out.push_str(&format!("package:{name} uid:{}\n", 10000 + index));
             } else {
                 out.push_str(&format!("package:{name}\n"));
             }
@@ -458,6 +460,15 @@ impl Device {
                 }
             }
             "resolve-activity" => {
+                if rest
+                    .iter()
+                    .any(|a| a == "android.intent.category.LEANBACK_LAUNCHER")
+                {
+                    return Some(match rest.last().filter(|pkg| self.usable(pkg)) {
+                        Some(pkg) => Out::ok(format!("{pkg}/.MainActivity\n")),
+                        None => Out::ok("No activity found\n"),
+                    });
+                }
                 if !rest.iter().any(|a| a == "android.intent.category.HOME") {
                     return None;
                 }
@@ -627,6 +638,12 @@ impl Device {
     }
 
     fn appops(&mut self, args: &[String]) -> Option<Out> {
+        let args: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(i, a)| a.as_str() != "--user" && (*i == 0 || args[*i - 1] != "--user"))
+            .map(|(_, a)| a.clone())
+            .collect();
         let sub = args.first()?.as_str();
         let pkg = args.get(1)?;
         let op = args.get(2)?;
@@ -667,6 +684,11 @@ impl Device {
             "activity" if args.len() == 2 && args[1] == "settings" => {
                 "ACTIVITY MANAGER SETTINGS (dumpsys activity settings) activity_manager_constants:\n  max_cached_processes=32\n\n  CUR_MAX_CACHED_PROCESSES=32\n  CUR_MAX_EMPTY_PROCESSES=16\n".into()
             }
+            "activity" if args.get(1).is_some_and(|s| s == "activities") => {
+                format!("ACTIVITY MANAGER ACTIVITIES\n mResumedActivity: ActivityRecord{{sim u0 {}/.MainActivity}}\n", self.home.preferred.as_deref().unwrap_or("com.google.android.tvlauncher/.MainActivity").split('/').next().unwrap())
+            }
+            "activity" if args.get(1).is_some_and(|s| s == "services") => "ACTIVITY MANAGER SERVICES\n".into(),
+            "media_session" => "MEDIA SESSION SERVICE\nSessions Stack - have 0 sessions\n".into(),
             _ => return None,
         }))
     }
@@ -711,6 +733,7 @@ impl Device {
                 (kp == pkg).then_some((perm, *v))
             })
             .collect();
+        out.push_str("    versionCode=1 minSdk=23 targetSdk=30\n");
         if !perms.is_empty() {
             out.push_str("      runtime permissions:\n");
             for (perm, granted) in perms {
@@ -846,19 +869,32 @@ impl Device {
     fn am(&mut self, args: &[String]) -> Option<Out> {
         let sub = args.first()?.as_str();
         Some(match sub {
+            "get-current-user" => Out::ok("0\n"),
             "start" => {
                 let intent = args[1..].join(" ");
                 self.started.push(intent.clone());
                 let wait = args.iter().any(|a| a == "-W");
                 let mut out = format!("Starting: Intent {{ {intent} }}\n");
                 if wait {
-                    out.push_str(
-                        "Status: ok\nLaunchState: WARM\nTotalTime: 120\nWaitTime: 130\nComplete\n",
-                    );
+                    let package = args
+                        .windows(2)
+                        .find(|pair| pair[0] == "-n")
+                        .and_then(|pair| pair[1].split('/').next())
+                        .unwrap_or("");
+                    let cold = self.texts.remove(&format!("sim:cold:{package}")).is_some();
+                    let state = if cold { "COLD" } else { "WARM" };
+                    out.push_str(&format!("Status: ok\nLaunchState: {state}\nTotalTime: 120\nWaitTime: 130\nComplete\n"));
                 }
                 Out::ok(out)
             }
-            "force-stop" | "kill" | "kill-all" => Out::ok(""),
+            "force-stop" => {
+                if let Some(package) = args.last() {
+                    self.texts
+                        .insert(format!("sim:cold:{package}"), "true".into());
+                }
+                Out::ok("")
+            }
+            "kill" | "kill-all" => Out::ok(""),
             _ => return None,
         })
     }
@@ -958,6 +994,14 @@ impl DeviceShell<'_> {
                 Out::ok("")
             }
             "getprop" => dev.getprop(args),
+            "test" if args.len() == 3 && args[1] == "=" => {
+                let value = match args[0].as_str() {
+                    "$(getprop ro.serialno)" => dev.props.get("ro.serialno").cloned().unwrap_or_default(),
+                    "$(am get-current-user)" => "0".to_string(),
+                    other => other.to_string(),
+                };
+                Out::with_code("", if value == args[2] { 0 } else { 1 })
+            }
             "settings" => dev.settings(args),
             "pm" => return dev.pm(args, self.stock),
             "cmd" => match args.first().map(String::as_str) {
@@ -976,6 +1020,19 @@ impl DeviceShell<'_> {
                 Out::ok("")
             }
             "top" => Out::ok(dev.texts.get("top -b -n 1")?.clone()),
+            "ps" if args.iter().any(|arg| arg == "UID,PID,NAME") => {
+                let mut text = String::from("UID PID NAME\n");
+                let pattern = regex::Regex::new(r"K:\s+(\S+)\s+\(pid\s+(\d+)").unwrap();
+                if let Some(mem) = dev.texts.get("dumpsys meminfo") {
+                    for row in pattern.captures_iter(mem) {
+                        let package = row[1].split(':').next().unwrap();
+                        if let Some(index) = dev.packages.iter().position(|(name, p)| name == package && p.enabled && p.installed) {
+                            text.push_str(&format!("{} {} {}\n", 10000 + index, &row[2], &row[1]));
+                        }
+                    }
+                }
+                Out::ok(text)
+            }
             "df" => Out::ok(
                 dev.texts
                     .get("df -h /data")
