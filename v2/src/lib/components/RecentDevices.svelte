@@ -20,9 +20,11 @@
   onMount(() => {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
-      if (Array.isArray(value)) recent = value.filter((item): item is Recent =>
-        !!item && typeof item.address === "string" && typeof item.name === "string" &&
-        typeof item.last_seen_at === "number").slice(0, 8);
+      if (Array.isArray(value)) recent = value.flatMap((item): Recent[] => {
+        if (typeof item === "string") return [{ address: item, name: item, last_seen_at: 0 }];
+        return item && typeof item.address === "string" && typeof item.name === "string" &&
+          typeof item.last_seen_at === "number" ? [item] : [];
+      }).slice(0, 8);
     } catch { recent = []; }
     ready = true;
   });

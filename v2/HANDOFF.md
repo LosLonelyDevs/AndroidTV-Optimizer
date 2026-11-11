@@ -12,6 +12,9 @@ upstream's current review workflow. Grouped device controls live in the device's
 **Settings** tab. Quick install and Shizuku follow Install APK; recording and
 storage exploration live in **Device tools**. Saved-address retries still require
 the connected device to identify itself, and never merge devices by IP.
+Saved boot tweaks now require a verified hardware ID. Legacy pins keyed only by
+transport address stay on disk but must be pinned again; they cannot safely be
+assigned to whichever TV currently answers at that address.
 
 Screen recording uses the platform-tools engine because native ADB does not
 implement tracked child processes. Choose it in the application's Settings > ADB

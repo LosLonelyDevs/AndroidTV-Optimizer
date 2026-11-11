@@ -17,7 +17,8 @@
 //!
 //! Storage mirrors `safety_overrides`: a best-effort JSON file in `data_dir`
 //! where a read/write failure degrades to "nothing remembered", never to a
-//! command error. Keyed by serial, because the chosen value is per device.
+//! command error. Pins are keyed by verified hardware ID, never by an address.
+//! Legacy address-based pins remain on disk but must be pinned again explicitly.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -95,7 +96,8 @@ pub async fn list_boot_tweaks(
     state: State<'_, AppState>,
     serial: String,
 ) -> Result<Vec<BootTweak>, String> {
-    Ok(list_boot_tweaks_impl(&state.data_dir, &serial).await)
+    let identity = verified_device_key(state.inner(), &serial).await?;
+    Ok(list_boot_tweaks_impl(&state.data_dir, &identity).await)
 }
 
 async fn list_boot_tweaks_impl(data_dir: &Path, serial: &str) -> Vec<BootTweak> {
@@ -128,7 +130,8 @@ pub async fn set_boot_tweak(
     key: String,
     value: String,
 ) -> Result<Vec<BootTweak>, String> {
-    set_boot_tweak_impl(&state.data_dir, &serial, &namespace, &key, &value).await
+    let identity = verified_device_key(state.inner(), &serial).await?;
+    set_boot_tweak_impl(&state.data_dir, &identity, &namespace, &key, &value).await
 }
 
 async fn set_boot_tweak_impl(
@@ -164,12 +167,33 @@ pub async fn reapply_boot_tweaks(
     state: State<'_, AppState>,
     serial: String,
 ) -> Result<ReapplyResult, String> {
-    reapply_boot_tweaks_impl(state.inner(), &serial).await
+    let identity = verified_device_key(state.inner(), &serial).await?;
+    reapply_boot_tweaks_impl(state.inner(), &serial, &identity).await
 }
 
-async fn reapply_boot_tweaks_impl(state: &AppState, serial: &str) -> Result<ReapplyResult, String> {
+async fn verified_device_key(state: &AppState, serial: &str) -> Result<String, String> {
+    use atv_optimizer_core::commands::devices::{device_profile_impl, verified_hardware_id};
+    let device = device_profile_impl(state, serial).await?;
+    if !matches!(device.status, crate::engine::types::DeviceStatus::Device) {
+        return Err(
+            "Saved tweaks require an authorized device with a verified hardware ID.".into(),
+        );
+    }
+    let identity = device
+        .properties
+        .as_ref()
+        .and_then(|properties| verified_hardware_id(&properties.serial_number))
+        .ok_or("Saved tweaks require a verified hardware ID; an address is not an identity.")?;
+    Ok(format!("hardware:{identity}"))
+}
+
+async fn reapply_boot_tweaks_impl(
+    state: &AppState,
+    serial: &str,
+    identity: &str,
+) -> Result<ReapplyResult, String> {
     let adb = state.adb_snapshot().await;
-    let wanted = list_boot_tweaks_impl(&state.data_dir, serial).await;
+    let wanted = list_boot_tweaks_impl(&state.data_dir, identity).await;
     if wanted.is_empty() {
         return Ok(ReapplyResult {
             reapplied: Vec::new(),
@@ -281,7 +305,7 @@ mod tests {
             .on_shell("settings get global window_animation_scale", "0.5");
         let state = state_at(dir.path(), mock);
 
-        let r = reapply_boot_tweaks_impl(&state, "S1").await.unwrap();
+        let r = reapply_boot_tweaks_impl(&state, "S1", "S1").await.unwrap();
         assert!(r.ok);
         assert_eq!(
             r.reapplied,
@@ -294,9 +318,31 @@ mod tests {
     async fn no_pins_means_no_adb_traffic() {
         let dir = tempfile::tempdir().unwrap();
         let state = state_at(dir.path(), MockAdb::default());
-        let r = reapply_boot_tweaks_impl(&state, "S1").await.unwrap();
+        let r = reapply_boot_tweaks_impl(&state, "S1", "S1").await.unwrap();
         assert!(r.ok);
         assert!(r.reapplied.is_empty());
         assert!(r.message.is_empty(), "silent when there's nothing pinned");
+    }
+
+    #[tokio::test]
+    async fn an_address_or_another_hardware_id_never_restores_pins() {
+        let dir = tempfile::tempdir().unwrap();
+        for identity in ["192.0.2.10:5555", "hardware:old-tv"] {
+            set_boot_tweak_impl(
+                dir.path(),
+                identity,
+                "global",
+                "window_animation_scale",
+                "0.5",
+            )
+            .await
+            .unwrap();
+        }
+        let state = state_at(dir.path(), MockAdb::default());
+        let result = reapply_boot_tweaks_impl(&state, "192.0.2.10:5555", "hardware:new-tv")
+            .await
+            .unwrap();
+        assert!(result.ok);
+        assert!(result.reapplied.is_empty());
     }
 }
