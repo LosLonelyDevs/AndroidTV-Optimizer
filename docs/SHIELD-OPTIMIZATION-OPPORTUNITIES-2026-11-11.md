@@ -2,11 +2,13 @@
 
 Research date: 2026-11-11. Scope: the desktop fork rebased onto upstream `9bb838f4` (2.5.0), with fork source version 2.6.0. These are proposals, not implemented features or measured gains on a physical Shield.
 
-The best next step is a **Find my bottleneck** flow: measure the problem, offer one relevant change, then repeat the measurement. The largest likely gains come from fixing a poor streaming path, an unnecessary transcode, or slow storage. More blanket debloating is a weaker general-purpose bet.
+**Updated priority: RAM utilization.** The requested next feature is a [RAM optimization workflow](SHIELD-RAM-OPTIMIZATION-PROPOSAL-2026-11-11.md): identify persistent background consumers, offer reversible per-app background restrictions, and measure whether the change reduces memory pressure. This adds a control between closing an app and disabling it entirely. Its effect on Shield firmware still needs physical validation.
+
+The broader **Find my bottleneck** flow remains useful: measure the problem, offer one relevant change, then repeat the measurement. The general-purpose opportunities below address streaming paths, unnecessary transcoding, and slow storage; their ranking does not override the RAM priority above.
 
 ## What the app already covers
 
-The source audit found existing debloat and launcher workflows, curated safety gates, app cache/data controls, storage capacity/category reports, CPU/RAM/network-rate sampling, temperature and thermal-status reporting, display controls, frame-rate guidance, audio passthrough, Kodi configuration, animation/background-process settings, and other advanced tweaks. The proposals below extend those capabilities rather than rename them.
+The source audit found existing debloat and launcher workflows, curated safety gates, app cache/data controls, storage capacity/category reports, CPU/RAM/network-rate sampling, temperature and thermal-status reporting, display controls, frame-rate guidance, audio passthrough, Kodi configuration, animation controls, cached-process-limit reporting, and other advanced tweaks. The displayed legacy `global.background_process_limit` value is explicitly labeled ignored by Android. The proposals below extend those capabilities rather than rename them.
 
 Relevant implementation points:
 
@@ -92,7 +94,7 @@ Android documents different startup states and measurement through activity-mana
 
 ## Recommended delivery order
 
-Start with the reusable measurement/session foundation and LAN diagnosis. Add the Plex advisor next, then storage testing. Follow with sustained thermal sessions and verified model-specific controls. Read-only/manual guidance is the first milestone; automation follows only after physical validation on the relevant Shield models and firmware.
+Start with the RAM workflow requested after this initial research: background-residency history, reversible per-app restrictions, and repeatable memory-pressure comparisons. Validate the restriction mechanism on physical Shields before presenting it as effective. Follow with LAN diagnosis, the Plex advisor, storage testing, and sustained thermal sessions. Read-only/manual guidance is available where a device does not support a verified action.
 
 Do not spend the next cycle on a RAM booster, routine cache purge, indiscriminate background killing, root-only governor changes, or universal forced HDR/refresh settings. The current app already exposes several powerful controls. New work should show when a change helps, when it hurts, and when the available evidence cannot decide.
 
