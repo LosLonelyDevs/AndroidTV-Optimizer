@@ -1029,6 +1029,24 @@ export function handle(cmd: string, args: Record<string, unknown>): unknown {
       return null;
     case "health_report":
       return health;
+    case "ram_report":
+      return {
+        hardware_id: args.hardwareId, user: 0, sampled_at_ms: Date.now(),
+        reading: { total_mb: 2946, available_mb: 620, free_mb: 110, file_cache_mb: 430, swap_used_mb: 180, pressure_some_avg10: 1.2 },
+        notes: [],
+        apps: [
+          { package: "com.netflix.ninja", name: "Netflix", pss_mb: 190, blocked_reason: null, can_undo: false },
+          { package: "com.plexapp.android", name: "Plex", pss_mb: 135, blocked_reason: "Media or accessibility service", can_undo: false },
+          { package: "com.google.android.gms", name: "Google Play services", pss_mb: 110, blocked_reason: "Protected, caution, or unreviewed app", can_undo: false },
+        ],
+      };
+    case "ram_restrict":
+    case "ram_undo":
+      return "Demo only. No TV setting changed.";
+    case "ram_benchmark_trial":
+      return { hardware_id: args.hardwareId, user: args.user, package: args.package, cold: args.cold,
+        firmware: "demo", app_version: "versionCode=1", timing: { total_ms: 230, wait_ms: 240, launch_state: args.cold ? "COLD" : "WARM" },
+        reading: { total_mb: 2946, available_mb: 620, free_mb: 110, file_cache_mb: 430, swap_used_mb: 180, pressure_some_avg10: 1.2 }, app_pss_mb: 190 };
     case "app_list_for_device":
       return apps;
     case "package_states":

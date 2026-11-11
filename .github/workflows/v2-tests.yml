@@ -565,6 +565,9 @@ jobs:
       - name: Desktop fork tools
         working-directory: v2
         run: npm run test:fork-tools
+      - name: RAM and benchmark comparisons
+        working-directory: v2
+        run: npm run test:ram
 
       - name: Launcher feedback
         working-directory: v2

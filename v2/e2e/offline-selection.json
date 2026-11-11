@@ -2,6 +2,7 @@
   "files": [
     "10-devices.mjs",
     "20-health.mjs",
+    "21-ram.mjs",
     "30-apps-optimize.mjs",
     "40-launcher.mjs",
     "42-setup-wraith.mjs",

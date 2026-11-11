@@ -84,10 +84,11 @@
   import FolderApkTab from "$lib/components/FolderApkTab.svelte";
   import DeviceTools from "$lib/components/DeviceTools.svelte";
   import ConsoleTab from "$lib/components/ConsoleTab.svelte";
+  import RamOptimizer from "$lib/components/RamOptimizer.svelte";
 
   let serial = $derived(decodeURIComponent($page.params.serial ?? ""));
 
-  type Tab = "overview" | "health" | "media" | "launcher" | "apps" | "optimize" | "tweaks" | "remote" | "files" | "snapshot" | "sideload" | "shell" | "logs" | "settings" | "tools";
+  type Tab = "overview" | "health" | "ram" | "media" | "launcher" | "apps" | "optimize" | "tweaks" | "remote" | "files" | "snapshot" | "sideload" | "shell" | "logs" | "settings" | "tools";
   let activeTab = $state<Tab>("overview");
   let appListView = $state<"all" | "catalog">("catalog");
   let apkView = $state<"install" | "folders">("install");
@@ -2374,6 +2375,7 @@
     {#each [
       { id: "overview", label: "Overview", far: false },
       { id: "health", label: "Health", far: false },
+      { id: "ram", label: "RAM", far: false },
       { id: "optimize", label: "Optimize", far: false },
       { id: "apps", label: "App List", far: false },
       { id: "launcher", label: "Launcher", far: false },
@@ -2623,7 +2625,7 @@
               {#if report.ram.swap_mb != null}
                 <span
                   class="tip-wrap"
-                  data-tip="RAM ran out and the TV is paging to storage. A little is normal; hundreds of MB means something is hogging memory"
+                  data-tip="Compressed memory (ZRAM). Usage alone does not show harmful memory pressure. See RAM for available memory and pressure measurements."
                 >in use</span>
               {:else}
                 <span>not reported</span>
@@ -3853,6 +3855,9 @@
     <div id="tabpanel-settings" hidden={activeTab !== "settings"}>
       <DesktopSettingsTab {serial} deviceType={device.device_type} onSettingsChanged={invalidateDeviceCaches} onLauncher={() => activeTab = "launcher"} />
     </div>
+  {/if}
+  {#if visited.ram}
+    <div hidden={activeTab !== "ram"}><RamOptimizer {serial} hardwareId={device.properties?.serial_number ?? null} active={activeTab === "ram"} /></div>
   {/if}
   {#if visited.tools}
     <div hidden={activeTab !== "tools"}><DeviceTools {serial} /></div>

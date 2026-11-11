@@ -92,6 +92,7 @@ click **Request approval**, then on the TV tick **Always allow from this compute
 |-----|--------------|
 | **Overview** | Model, Android version, build and hardware ID. |
 | **Health** | Temperature, CPU and network sampling, RAM and storage, display mode and HDR, audio, and the apps using the most memory, each with a safety verdict. |
+| **RAM** | Record baseline/comparison memory sessions, restrict eligible apps' background activity with saved undo, and benchmark app launch time and RAM before/after. See [RAM workflow and limits](docs/RAM-WORKFLOW.md). |
 | **Playback** | What the TV is actually outputting: resolution, refresh rate, HDR and audio passthrough. |
 | **Launcher** | Install a supported launcher, make it the default, and, where the firmware allows it, disable the stock launcher after you confirm. |
 | **App List** | Disable, enable or uninstall any app, or install one from the Play Store. |

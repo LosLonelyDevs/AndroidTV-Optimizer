@@ -33,12 +33,24 @@ Installers for macOS/Linux/Windows are built on every `v2-*` tag push via
 
 ## Unreleased on `main`
 
+Desktop RAM workflow: the **RAM** tab records bounded memory sessions, supports
+verified per-app background restrictions with durable undo, and runs three-trial
+resume/cold app-launch benchmarks with before/after deltas. Shared pure parsing
+is in `crates/core/src/engine/ram.rs`; desktop I/O is in
+`src-tauri/src/commands/ram.rs`. Undo journals have their own initial schema 1
+under `data_dir/ram-undo`, keyed in their content by verified hardware ID, Android
+user, package and UID. They do not change snapshot schema 4. Unknown/zero/future
+journal schemas fail closed; no earlier journal format exists to migrate.
+See [workflow and acceptance limits](../docs/RAM-WORKFLOW.md). Physical Shield
+effectiveness remains unverified. No release tag or updater publication is part
+of this change.
+
 Snapshot schema is **4** on `main` (PR #353): snapshots record catalog apps that weren't installed,
 and restore disables any of them that are back (never uninstalls). 2.5.0 and earlier refuse v4
 files as newer than they support. Review rows suggest Uninstall only for a store app in
 `pm list packages -3`; see `AppEntry::suggested_method`.
 
-Nothing yet. `v2-2.5.0` (2026-11-04) shipped the rename (identifier `com.atvoptimizer.app`, data
+Upstream `v2-2.5.0` (2026-11-04) shipped the rename (identifier `com.atvoptimizer.app`, data
 folder `ATVOptimizer`, binary `atv-optimizer`, crates `atv-optimizer` / `atv_optimizer_lib` /
 `atv-optimizer-core`, Homebrew cask `atv-optimizer`) and the desktop connection work below; its
 notes are in `v2/CHANGELOG.md`.

@@ -84,6 +84,10 @@ async function captureScreens(page, shot) {
     await page.locator("#tab-health").click();
     await page.getByText("3840x2160", { exact: false }).first().waitFor();
     await shot("health");
+    await page.locator("#tab-ram").click();
+    await page.getByRole("heading", { name: "Reduce background RAM" }).waitFor();
+    await page.getByRole("button", { name: "Restrict Netflix", exact: true }).waitFor();
+    await shot("ram");
 
     // 5. Playback capabilities.
     await page.locator("#tab-media").click();

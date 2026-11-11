@@ -112,6 +112,10 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 export const send: Send = (command, args) => tauriInvoke(command, args);
 
 export const api = {
+  ramReport: (serial: string, hardwareId: string) => invoke<import("./types").RamReport>("ram_report", { serial, hardwareId }),
+  ramRestrict: (serial: string, hardwareId: string, user: number, packageName: string, keptPackages: string[]) => invoke<string>("ram_restrict", { serial, hardwareId, user, package: packageName, keptPackages }),
+  ramUndo: (serial: string, hardwareId: string, user: number, packageName: string) => invoke<string>("ram_undo", { serial, hardwareId, user, package: packageName }),
+  ramBenchmarkTrial: (serial: string, hardwareId: string, user: number, packageName: string, cold: boolean) => invoke<import("./types").RamBenchmarkTrial>("ram_benchmark_trial", { serial, hardwareId, user, package: packageName, cold }),
   telemetrySettings: () => invoke<TelemetrySettings>("telemetry_settings"),
   setTelemetryEnabled: (enabled: boolean) =>
     invoke<TelemetrySettings>("set_telemetry_enabled", { enabled }),

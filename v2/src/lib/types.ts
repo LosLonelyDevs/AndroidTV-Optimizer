@@ -904,3 +904,40 @@ export function deviceNoun(t: DeviceType): string {
 export function riskBadgeClass(r: RiskTier): string {
   return `risk-${r}`;
 }
+export interface RamReading {
+  total_mb: number | null;
+  available_mb: number | null;
+  free_mb: number | null;
+  file_cache_mb: number | null;
+  swap_used_mb: number | null;
+  pressure_some_avg10: number | null;
+}
+
+export interface RamApp {
+  package: string;
+  name: string;
+  pss_mb: number | null;
+  blocked_reason: string | null;
+  can_undo: boolean;
+}
+
+export interface RamReport {
+  hardware_id: string;
+  user: number;
+  sampled_at_ms: number;
+  reading: RamReading;
+  apps: RamApp[];
+  notes: string[];
+}
+
+export interface RamBenchmarkTrial {
+  hardware_id: string;
+  user: number;
+  package: string;
+  cold: boolean;
+  firmware: string;
+  app_version: string;
+  timing: { total_ms: number; wait_ms: number | null; launch_state: string | null };
+  reading: RamReading;
+  app_pss_mb: number | null;
+}

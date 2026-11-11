@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:fork-tools": "node tests/fork-tools.mjs",
+    "test:ram": "node tests/ram-session.mjs",
     "test:installer-maintenance": "node tests/installer-maintenance.mjs",
     "dev": "vite dev",
     "build": "vite build",

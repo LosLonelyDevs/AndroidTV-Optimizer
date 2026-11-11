@@ -18,6 +18,7 @@ pub mod log_redact;
 pub mod logcat;
 pub mod media;
 pub mod optimize;
+pub mod ram;
 pub mod release_assets;
 pub mod safety;
 pub mod snapshot;

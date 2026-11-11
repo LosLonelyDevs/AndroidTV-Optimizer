@@ -40,6 +40,7 @@ const MAX_DELTA = 1.5;
 const DEVICE_TABS = [
   "overview",
   "health",
+  "ram",
   "media",
   "settings",
   "apps",
