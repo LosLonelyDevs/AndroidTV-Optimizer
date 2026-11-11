@@ -37,12 +37,12 @@ export const scenarios = [
       await ctx.step("snapshot saved");
 
       await previewNewest(ctx);
-      await page.getByText("0 packages will be disabled", { exact: true }).waitFor();
-      ctx.assert.match(await page.locator(".preview-box").innerText(), /0 settings will be written; 0 settings will be reset/);
+      const changes = page.locator(".plan-totals .foot-card").filter({ hasText: "Will change" });
+      ctx.assert.equal(await changes.locator(".plan-total").innerText(), "0 items");
       const home = page.locator('tr[data-plan-item="launcher"]');
       ctx.assert.equal(await home.count(), 1);
       ctx.assert.match(await home.getAttribute("class"), /plan-noop/, "no launcher change proposed");
-      ctx.assert.match(await home.innerText(), /com\.spocky\.projengmenu[\s\S]*Unchanged/);
+      ctx.assert.match(await home.innerText(), /com\.spocky\.projengmenu[\s\S]*no change/);
       const scale = await planRow(ctx, "global.window_animation_scale");
       ctx.assert.match(await scale.innerText(), /0\.5/, "Now shows the device's real value");
       await ctx.step("preview of an unchanged device: no launcher change, real Now values");
@@ -56,7 +56,7 @@ export const scenarios = [
       ctx.assert.match((await ctx.device(SHIELD.serial)).home.resolved, /tvlauncher/);
 
       await previewNewest(ctx);
-      ctx.assert.match(await (await planRow(ctx, PRINTSPOOLER)).innerText(), /Enabled[\s\S]*Disabled/);
+      ctx.assert.match(await (await planRow(ctx, PRINTSPOOLER)).innerText(), /Enabled[\s\S]*Disabled/i);
       ctx.assert.match(await (await planRow(ctx, "global.window_animation_scale")).innerText(), /1\.0[\s\S]*0\.5/);
       ctx.assert.match(await (await planRow(ctx, "system.screen_off_timeout")).innerText(), /600000[\s\S]*120000/);
       const homeChange = page.locator('tr[data-plan-item="launcher"]');
@@ -64,8 +64,8 @@ export const scenarios = [
       ctx.assert.match(await homeChange.innerText(), /tvlauncher[\s\S]*com\.spocky\.projengmenu/);
       await ctx.step("preview after changes");
 
-      await page.getByRole("button", { name: "Apply this snapshot" }).click();
-      await page.getByRole("button", { name: "Applied", exact: true }).waitFor({ timeout: 60_000 });
+      await page.getByRole("button", { name: "Restore this snapshot" }).click();
+      await page.getByRole("button", { name: "Restored", exact: true }).waitFor({ timeout: 60_000 });
       await ctx.step("restored");
 
       const after = await ctx.device(SHIELD.serial);

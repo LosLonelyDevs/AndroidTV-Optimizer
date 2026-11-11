@@ -19,6 +19,10 @@ pub fn allowed(command: &str) -> bool {
             | "display_report"
             | "detect_media_apps"
             | "system_info"
+            | "list_quick_apps"
+            | "shizuku_status"
+            // Reads the in-process test activity ring; no host or device I/O.
+            | "activity_tail"
             | "connect_device"
             | "disconnect_device"
             | "pair_device"
