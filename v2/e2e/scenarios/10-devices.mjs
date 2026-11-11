@@ -1,7 +1,7 @@
 // Devices tab: discovery, identity and the connection lifecycle, against the
 // real device commands and the simulated adb server.
 
-import { PIXEL, SHIELD } from "../lib/worlds.mjs";
+import { PIXEL, SHIELD, shieldScenario } from "../lib/worlds.mjs";
 
 const row = (ctx, serial) => ctx.page.locator(`[data-serial="${serial}"]`);
 
@@ -24,6 +24,49 @@ const PIXEL_TWO_WAYS = {
 };
 
 export const scenarios = [
+  ...[false, true].map((legacy) => ({
+    name: `devices-clear-recent${legacy ? "-legacy" : ""}`,
+    async run(ctx) {
+      await ctx.reset(shieldScenario());
+      const cleared = "198.51.100.10:5555";
+      const retained = "198.51.100.11:5555";
+      await ctx.page.addInitScript(({ cleared, retained, legacy }) => {
+        const key = "shieldopt.recentNetworkDevices";
+        if (localStorage.getItem(key) === null) {
+          const saved = [cleared, retained].map((address) => legacy ? address : {
+            address, name: address, model: "", device_type: "unknown", last_seen_at: 0,
+          });
+          localStorage.setItem(key, JSON.stringify(saved));
+          localStorage.setItem("shieldopt.lastDeviceSerial", cleared);
+        }
+        sessionStorage.setItem("shieldopt.bootAutoOpened", "1");
+      }, { cleared, retained, legacy });
+      await ctx.open("/");
+      const recentRow = ctx.page.locator(`[data-recent-address="${cleared}"]`);
+      const clear = recentRow.getByRole("button", { name: /^Clear/ });
+      await ctx.waitFor(() => clear.isEnabled(), { message: "saved-device checks completed" });
+      ctx.assert.ok((await ctx.log()).some((entry) => entry.args[0] === "connect" && entry.args[1] === cleared));
+      await clear.click();
+      await recentRow.waitFor({ state: "detached" });
+      const saved = await ctx.page.evaluate(() => ({
+        recent: JSON.parse(localStorage.getItem("shieldopt.recentNetworkDevices")),
+        last: localStorage.getItem("shieldopt.lastDeviceSerial"),
+      }));
+      ctx.assert.ok(!saved.recent.some((item) => item.address === cleared));
+      ctx.assert.ok(saved.recent.some((item) => item.address === retained));
+      ctx.assert.equal(saved.last, null, "cleared device is not reopened on startup");
+      const before = (await ctx.log()).length;
+      await ctx.page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await ctx.page.reload({ waitUntil: "networkidle" });
+      await ctx.page.getByRole("button", { name: "Scan LAN", exact: true }).click();
+      await ctx.text("Scanned 192.0.2.x", { exact: false }).waitFor();
+      const connects = (await ctx.log()).slice(before).filter((entry) => entry.args[0] === "connect");
+      ctx.assert.ok(!connects.some((entry) => entry.args[1] === cleared), "refresh, restart and scan do not retry the cleared address");
+      ctx.assert.ok(connects.some((entry) => entry.args[1] === retained), "other saved devices still reconnect");
+      ctx.assert.equal(await ctx.page.locator(`[data-recent-address="${cleared}"]`).count(), 0);
+      await ctx.step("cleared device stays removed after refresh, reload and scan");
+    },
+  })),
   {
     name: "devices-scan-lan",
     async run(ctx) {

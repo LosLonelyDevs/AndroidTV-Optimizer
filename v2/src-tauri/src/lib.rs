@@ -8,6 +8,7 @@
 // `#[async_trait]` generates for every trait method. The attribute is the
 // macro's, not ours, so there is nothing to change at the call sites.
 #![allow(clippy::double_must_use)]
+pub mod activity_log;
 pub mod adb;
 pub mod commands;
 pub mod rename;
@@ -20,8 +21,8 @@ use std::sync::Arc;
 use adb::SubprocessAdb;
 use atv_optimizer_core::adb::{AdbDriver, AdbError, AdbOutput, AdbResult, Leases};
 use atv_optimizer_core::commands::{
-    apps, devices, health, input, launcher, loader, logcat, optimize, reboot, recovery, screenshot,
-    shell, snapshot, telemetry, tuning,
+    apps as core_apps, health as core_health, input, launcher, loader, logcat, optimize, reboot,
+    recovery, screenshot, shell, snapshot, telemetry, tuning,
 };
 use atv_optimizer_core::engine::telemetry::AppKind;
 use atv_optimizer_core::license::Entitlement;
@@ -32,8 +33,9 @@ use atv_optimizer_core::telemetry::{
 use commands::adb_engine::{self, AdbEngineControl, EngineStarter};
 use commands::quit::{self, AdbQuitControl};
 use commands::{
-    app_report, backup, diagnostics, files, install, local_network, scan, sideload, update,
-    AppState,
+    app_report, apps, audio, backup, boot_tweaks, console, devices, diagnostics, display, files,
+    health, install, local_network, media_apps, mirror, quick_install, recording, safety_overrides,
+    scan, sideload, system, update, AppState,
 };
 use tauri::Manager;
 
@@ -263,8 +265,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         scan::local_address_for,
         devices::rename_device,
         health::health_report,
-        health::media_report,
-        health::resource_sample,
+        core_health::media_report,
+        core_health::resource_sample,
         health::app_list_for_device,
         health::report_all,
         install::adb_status,
@@ -285,28 +287,28 @@ pub fn invoke_handler<R: tauri::Runtime>(
         launcher::set_home_any,
         launcher::disable_stock_launcher,
         launcher::disable_setup_helper,
-        apps::disable_package,
-        apps::enable_package,
-        apps::force_stop,
+        core_apps::disable_package,
+        core_apps::enable_package,
+        core_apps::force_stop,
         screenshot::take_screenshot,
-        apps::uninstall_package,
-        apps::reinstall_existing,
-        apps::open_play_store,
-        apps::package_states,
-        apps::list_other_packages,
-        apps::user_installed_packages,
+        core_apps::uninstall_package,
+        core_apps::reinstall_existing,
+        core_apps::open_play_store,
+        core_apps::package_states,
+        core_apps::list_other_packages,
+        core_apps::user_installed_packages,
         apps::list_installed_packages,
-        apps::app_memory_map,
-        apps::app_storage_map,
-        apps::app_apk_size,
+        core_apps::app_memory_map,
+        core_apps::app_storage_map,
+        core_apps::app_apk_size,
         apps::app_usage_map,
-        apps::safety_info,
-        apps::process_safety_info,
-        apps::trim_caches,
-        apps::app_permission_state,
-        apps::set_app_permission,
-        apps::set_app_op,
-        apps::get_app_op,
+        core_apps::safety_info,
+        core_apps::process_safety_info,
+        core_apps::trim_caches,
+        core_apps::app_permission_state,
+        core_apps::set_app_permission,
+        core_apps::set_app_op,
+        core_apps::get_app_op,
         input::remote_open,
         input::remote_close,
         input::send_text,
@@ -357,6 +359,40 @@ pub fn invoke_handler<R: tauri::Runtime>(
         telemetry::dismiss_telemetry_notice,
         telemetry::telemetry_action,
         telemetry::telemetry_error,
+        devices::ping_device,
+        apps::installed_package_versions,
+        safety_overrides::list_safety_overrides,
+        safety_overrides::set_safety_override,
+        apps::clear_app_cache,
+        apps::clear_app_data,
+        apps::kill_all_background,
+        files::storage_usage,
+        display::display_report,
+        audio::audio_report,
+        audio::set_surround_output,
+        audio::set_surround_formats,
+        media_apps::detect_media_apps,
+        media_apps::stage_kodi_config,
+        media_apps::grant_write_secure_settings,
+        system::system_info,
+        system::open_system_screen,
+        system::power_action,
+        system::launch_app,
+        system::repair_ntp,
+        system::compile_speed_profile,
+        console::run_console_shell,
+        console::activity_tail,
+        recording::start_recording,
+        recording::stop_recording,
+        quick_install::list_quick_apps,
+        quick_install::install_quick_app,
+        quick_install::setup_shizuku,
+        quick_install::shizuku_status,
+        boot_tweaks::list_boot_tweaks,
+        boot_tweaks::set_boot_tweak,
+        boot_tweaks::reapply_boot_tweaks,
+        system::set_play_protect,
+        mirror::mirror_screen,
     ]
 }
 

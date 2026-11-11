@@ -29,9 +29,10 @@ export const scenarios = [
       ctx.assert.match(await katniss.innerText(), /pid\s+15826/);
       // Plex is installed and reviewed: the App List's suggestion, not a guess.
       ctx.assert.match(await rowFor("com.plexapp.android").innerText(), /Review: uninstall if unused/);
-      ctx.assert.match(await rowFor("com.google.android.gms").innerText(), /PROTECTED/);
+      await rowFor("com.google.android.gms").getByText("Protected", { exact: true }).waitFor();
+      ctx.assert.equal(await rowFor("com.google.android.gms").getByRole("button", { name: "Disable", exact: true }).count(), 0);
       ctx.assert.match(await rowFor("surfaceflinger").innerText(), /Not an app/);
-      ctx.assert.match(await rowFor("surfaceflinger").innerText(), /not a package/);
+      ctx.assert.equal(await rowFor("surfaceflinger").getByRole("button").count(), 0, "native processes have no package actions");
       await ctx.step("memory rows: full names, pids, suggestions");
 
       // A disabled app has no process: disable Plex on the device and the

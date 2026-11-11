@@ -25,17 +25,18 @@ const manifest = JSON.parse(
 const real = parseReleaseNotes(manifest.notes);
 
 // Expectations come from the manifest itself, which every release replaces.
-const firstHeading = manifest.notes.match(/^###\s+(.+)$/m)?.[1].trim();
+const shippedNotes = stripTrailingBoilerplate(manifest.notes);
+const firstHeading = shippedNotes.match(/^###\s+(.+)$/m)?.[1].trim();
 const firstItemWords = manifest.notes
   .match(/^- (.+)$/m)?.[1]
   .replace(/[*`]/g, "")
   .split(/\s+/)
   .slice(0, 4)
   .join(" ");
-assert.ok(firstHeading && firstItemWords, "fixture has a heading and a list item");
+assert.ok(firstItemWords, "fixture has a list item");
 
-assert.ok(real.length > 10, "the real notes parse into many blocks");
-assert.ok(
+assert.equal(real.filter((b) => b.kind === "item").length, (shippedNotes.match(/^\s*- /gm) ?? []).length, "every shipped list item survives");
+if (firstHeading) assert.ok(
   real.some((b) => b.kind === "heading" && text(b) === firstHeading),
   `section headings survive: ${firstHeading}`,
 );

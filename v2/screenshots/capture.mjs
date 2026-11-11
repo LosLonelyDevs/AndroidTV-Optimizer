@@ -105,6 +105,9 @@ async function captureScreens(page, shot) {
     await page.locator(".measures [data-measure='storage']").first().waitFor();
     await page.mouse.move(0, 0);
     await shot("app-list");
+    await page.getByRole("button", { name: "All apps", exact: true }).click();
+    await page.locator(".kind-chips").waitFor();
+    await shot("all-apps");
 
     // 8. Optimize wizard — the plan loads on its own.
     await page.locator("#tab-optimize").click();
@@ -116,6 +119,18 @@ async function captureScreens(page, shot) {
     await page.locator("#tab-tweaks").click();
     await page.getByText("HDMI", { exact: false }).first().waitFor();
     await shot("tweaks");
+
+    await page.locator("#tab-settings").click();
+    await page.getByRole("heading", { name: "Display", exact: true }).waitFor();
+    await shot("device-display");
+    for (const label of ["Audio", "Input", "Device", "Advanced"]) {
+      await page.locator(".settings-sections").getByRole("button", { name: label, exact: true }).click();
+      await shot(`device-${label.toLowerCase()}`);
+    }
+    await page.locator("#tab-tools").click();
+    await page.getByRole("button", { name: "Scan storage", exact: true }).click();
+    await page.getByRole("heading", { name: "Largest files", exact: true }).waitFor();
+    await shot("device-tools");
 
     // 10. Remote.
     await page.locator("#tab-remote").click();
@@ -133,6 +148,9 @@ async function captureScreens(page, shot) {
     await page.locator("#tab-sideload").click();
     await page.getByText("Install APK", { exact: false }).first().waitFor();
     await shot("install-apk");
+    await page.getByRole("button", { name: "Folder & version manager", exact: true }).click();
+    await page.getByRole("button", { name: "Choose folder…", exact: true }).waitFor();
+    await shot("folder-apk-manager");
 
     // 13. Snapshot (per-device).
     await page.locator("#tab-snapshot").click();
@@ -181,8 +199,9 @@ async function captureScreens(page, shot) {
 
 async function main() {
   console.log("Starting dev server (demo mode)…");
-  const server = spawn("npm", ["run", "dev", "--", "--port", String(PORT)], {
+  const server = spawn(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "dev", "--", "--port", String(PORT)], {
     cwd: V2,
+    shell: process.platform === "win32",
     env: { ...process.env, VITE_DEMO: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });

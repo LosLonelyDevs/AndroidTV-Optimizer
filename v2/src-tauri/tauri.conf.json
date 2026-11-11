@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ATV Optimizer",
-  "version": "2.5.0",
-  "identifier": "com.atvoptimizer.app",
+  "productName": "Shield Optimizer",
+  "version": "2.6.0",
+  "identifier": "com.shieldoptimizer.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ATV Optimizer",
+        "title": "Android TV Optimizer",
         "width": 1100,
         "height": 760,
         "minWidth": 720,
@@ -25,9 +25,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcxMTFEMjVENTI5OEM3QjEKUldTeHg1aFNYZElSY1k0c3B2VmN0SlM1SUw5ZWdoWkVWeXVvR3RmRkNnNDNrWm1NanhOcTNOUjAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTA5QTI1MEQ0NDkxNkIKUldScmtVUU5KWnFnN0g2RHZuRnYwOG8wTkhKMTJsbVAra2JqbEh5M3dVNlByTjJIUGtvSFdGTkIK",
       "endpoints": [
-        "https://raw.githubusercontent.com/bryanroscoe/shield_optimizer/main/v2/updater/latest.json"
+        "https://raw.githubusercontent.com/LosLonelyDevs/shield_optimizer/main/v2/updater/latest.json"
       ]
     }
   },
@@ -56,12 +56,12 @@
       "signingIdentity": "-"
     },
     "windows": {
-      "wix": {
-        "version": "2.5.999",
-        "upgradeCode": "b9668541-670d-52c8-bca7-a006d95aa610"
-      },
       "nsis": {
-        "installerHooks": "./windows/hooks.nsh"
+        "template": "installer/installer.nsi"
+      },
+      "wix": {
+        "version": "2.6.999",
+        "upgradeCode": "b9668541-670d-52c8-bca7-a006d95aa610"
       }
     }
   }

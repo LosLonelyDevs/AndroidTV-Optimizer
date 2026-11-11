@@ -17,7 +17,7 @@ use super::types::{AppEntry, RiskTier};
 /// reader will refuse future versions explicitly.
 pub const SCHEMA_VERSION: u32 = 4;
 
-/// Setting keys we track in a snapshot — matches v1's `$Script:SnapshotSettingKeys`.
+/// Supported Android settings restored by snapshots, including desktop device controls.
 pub fn tracked_setting_keys() -> &'static [(&'static str, &'static str)] {
     &[
         ("global", "window_animation_scale"),
@@ -33,6 +33,14 @@ pub fn tracked_setting_keys() -> &'static [(&'static str, &'static str)] {
         ("global", "encoded_surround_output_enabled_formats"),
         ("secure", "screensaver_components"),
         ("secure", "screensaver_enabled"),
+        ("system", "screen_off_timeout"),
+        ("system", "user_rotation"),
+        ("secure", "location_mode"),
+        ("secure", "doze_enabled"),
+        ("global", "development_settings_enabled"),
+        ("global", "package_verifier_enable"),
+        ("global", "package_verifier_user_consent"),
+        ("global", "ntp_server"),
     ]
 }
 

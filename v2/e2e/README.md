@@ -199,7 +199,7 @@ turn that off. Pollers such as `adb devices` are matched by arguments only.
 Turn a session into a profile:
 
 ```sh
-"$CARGO_TARGET_DIR"/debug/e2e_server profile-from-session <session.jsonl> crates/core/tests/fixtures/devices/<name> --name <name>
+"$CARGO_TARGET_DIR"/debug/examples/e2e_server profile-from-session <session.jsonl> crates/core/tests/fixtures/devices/<name> --name <name>
 e2e/capture-device.sh --scrub-only crates/core/tests/fixtures/devices/<name>
 ```
 

@@ -113,8 +113,17 @@ pub struct PerformanceResult {
     pub message: String,
 }
 
-/// `apply_performance_settings` — the post-wizard step that writes the
-/// animation triple all at once. Optimize → 0.5, Restore → 1.0.
+/// `apply_performance_settings` — the post-wizard step that applies the
+/// device-wide performance triple in one shell call:
+///   - animation scales: Optimize → 0.5×, Restore → 1.0×;
+///   - app freezer (`cached_apps_freezer`): Optimize → `enabled`, Restore →
+///     `device_default`;
+///   - touch-response thresholds (`tap_duration_threshold`,
+///     `touch_blocking_period`): Optimize → `0.0` (most responsive), Restore →
+///     deleted so the platform default returns.
+///
+/// All are momentary system settings (not snapshot-tracked) and fully reversible
+/// via the `Default` profile, so no safety gate applies.
 #[tauri::command]
 pub async fn apply_performance_settings(
     state: State<'_, AppState>,

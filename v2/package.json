@@ -1,9 +1,11 @@
 {
   "name": "atv-optimizer-v2",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "",
   "type": "module",
   "scripts": {
+    "test:fork-tools": "node tests/fork-tools.mjs",
+    "test:installer-maintenance": "node tests/installer-maintenance.mjs",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",

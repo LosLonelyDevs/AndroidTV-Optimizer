@@ -99,7 +99,7 @@ export const scenarios = [
       ctx.assert.equal(d.home.role_holder, MONET, "Monet holds the HOME role");
       ctx.assert.match(d.home.resolved, new RegExp(WRAITH), "the resolver alone still names Setup Wraith");
 
-      await ctx.page.getByRole("button", { name: "Refresh" }).click();
+      await ctx.page.locator("#launcher-section").getByRole("button", { name: "Refresh", exact: true }).click();
       await ctx.waitFor(async () => /ACTIVE/.test(await monet.innerText()), { message: "Monet tagged ACTIVE" });
       ctx.assert.doesNotMatch(await wraith.innerText(), /ACTIVE/);
       const current = await ctx.page.locator(".launcher-foot .foot-value").innerText();

@@ -1,5 +1,11 @@
 # ATV Optimizer
 
+This desktop fork adds grouped Display, Audio, Input and Device settings, a unified
+all-apps view, per-device risk overrides, quick installation and Shizuku setup,
+APK version management, recording, storage tools and saved device addresses.
+See the [fork feature guide](docs/FORK-DIFFERENCES-2026-10-22.md) and
+[current integration notes](v2/HANDOFF.md).
+
 Debloat and tune your Android TV from your computer. Disable bloat, switch launchers, sideload
 APKs, adjust HDMI-CEC and frame-rate matching, and check device health, all from a desktop app.
 Works on **Nvidia Shield TV, Onn 4K Pro, Chromecast with Google TV, Google TV Streamer** and other

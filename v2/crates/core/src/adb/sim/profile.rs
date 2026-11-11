@@ -385,6 +385,13 @@ pub fn synthesize(d: &mut Device) {
             "Audio event log:\n- STREAM_MUSIC:\n   Devices: speaker\n".into()
         }
     });
+    d.texts.entry("dumpsys battery".into()).or_insert_with(|| {
+        if is_tv {
+            "Current Battery Service state:\n  present: false\n".into()
+        } else {
+            "Current Battery Service state:\n  present: true\n  level: 80\n  scale: 100\n".into()
+        }
+    });
     d.texts
         .entry("dumpsys hardware_properties".into())
         .or_insert_with(|| "****** Dump of HardwarePropertiesManagerService ******\nCPU temperatures: [46.5]\nGPU temperatures: [44.0]\nBattery temperature: []\nSkin temperatures: [41.0]\n".into());
