@@ -109,9 +109,10 @@ export const scenarios = [
       await ctx.reset(shieldScenario());
       await ctx.openDevice(SHIELD.key, "shell");
       const page = ctx.page;
-      const input = page.getByPlaceholder("pm list packages -d");
+      const shell = page.locator("#tabpanel-shell");
+      const input = shell.getByPlaceholder("pm list packages -d");
       await input.fill("getprop ro.serialno");
-      const run = page.getByRole("button", { name: /^Run/ }).first();
+      const run = shell.getByRole("button", { name: /^Run/ }).first();
       ctx.assert.equal(await run.isDisabled(), true, "Run is disabled until acknowledged");
       await ctx.step("run gated on the acknowledgement");
       const before = (await ctx.log()).filter((i) => i.args.join(" ").includes("getprop ro.serialno") && i.args.length === 4).length;

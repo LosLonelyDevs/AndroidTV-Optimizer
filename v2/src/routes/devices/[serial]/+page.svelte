@@ -1048,6 +1048,9 @@
       } finally {
         endStatesResync(resync);
       }
+    } else {
+      await loadApps();
+      if (!pageContextIsCurrent(context)) return;
     }
     // The Optimize wizard can disable launchers and many packages — mark the
     // Launcher and Health caches stale so they reload fresh on next visit.

@@ -40,6 +40,7 @@ v2/vendor/adb_client/src/server/models/device_long.rs internal-service
 
 # Reviewed public upstream 9bb838f4 imports. Device model numbers (D2140,
 # D2325, D2426) are not diff IDs; catalog names are Android package IDs.
+.prepush-allowlist diff-id
 docs/OPTIMIZE-CATALOG-REVIEW-2026-11-10.md diff-id
 v2/tools/catalog-review/progress.json diff-id
 v2/catalogs/cleanyourtv/upstream/examples/amazon-fire-tv-stick-4k-max-2023/debloat.txt internal-hostname

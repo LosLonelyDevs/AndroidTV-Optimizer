@@ -28,6 +28,8 @@ this file and shows the newest few sections, dated, from its version button.
 - Keep grouped device settings, the unified all-apps table with risk overrides, quick install and Shizuku, recording, storage exploration, saved addresses, and the activity console. App List also offers upstream's Catalog review view.
 - Preserve this fork's updater signing key, channel, installer identity, and MSI UpgradeCode. The version is one minor increment above upstream 2.5.0.
 - Use native confirmation dialogs for the ported app actions. Port the updater-signature checks to Windows and pin them to this fork's existing public key.
+- Remembered boot tweaks now belong to a verified hardware ID. Pin older address-based choices again before they can be reapplied; another TV at the same address must never inherit them.
+- Refresh app inventory after Optimize even when App List has not been opened, so app reports reflect the completed change.
 
 - Desktop and Android: DIRECTV, DisneyNOW and Live Channels now have reviewed Caution recommendations, starting at Keep. DIRECTV explains the operator-box and subscription caveats; retired DisneyNOW warns that it has no current Play download; Live Channels warns about tuner viewing, its guide and TV input shortcuts. None is selected automatically (#307, #318, #321).
 
