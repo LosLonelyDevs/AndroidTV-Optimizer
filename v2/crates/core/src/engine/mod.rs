@@ -7,15 +7,18 @@
 
 pub mod apk_abis;
 pub mod app_lists;
+pub mod audio;
 pub mod cast_name;
 pub mod detection;
 pub mod diagnostics;
 pub mod install_outcome;
+pub mod kodi;
 pub mod launcher;
 pub mod log_redact;
 pub mod logcat;
 pub mod media;
 pub mod optimize;
+pub mod release_assets;
 pub mod safety;
 pub mod snapshot;
 pub mod support;
@@ -24,8 +27,12 @@ pub mod telemetry_diag;
 pub mod types;
 
 pub use app_lists::{AppList, AppListBundle};
+pub use audio::{
+    build_enabled_formats_csv, parse_enabled_formats_csv, SurroundFormat, SURROUND_FORMATS,
+};
 pub use detection::{detect_device_type, is_fire_tv, tv_evidence, DeviceType, TvEvidence};
 pub use diagnostics::{format_diagnostics, DeviceDiagnostics, DiagnosticsInput};
+pub use kodi::{render_advancedsettings, AdjustRefreshRate, KodiProfile};
 pub use launcher::{
     home_keep_reason, is_last_enabled_home_handler, is_valid_package_name, launcher_rows,
     may_be_home_handler, paired_transient_holders, pick_current_home, plan_home_safe_disables,
@@ -36,6 +43,7 @@ pub use media::{
     Decoder, DisplayModeEntry, MediaCapabilities, SurroundMode, Verdict, VerdictLevel, VideoFormat,
 };
 pub use optimize::{compute_plan, OptimizeInputs, OptimizePlan};
+pub use release_assets::{select_asset, ReleaseAsset};
 pub use safety::{
     classify as classify_safety, classify_with_catalog, classify_with_sources, is_never_disable,
     shell_command_blocked, CatalogVerdict, Safety, SafetySource,

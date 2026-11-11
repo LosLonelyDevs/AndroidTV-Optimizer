@@ -20,6 +20,9 @@ pub struct InstallApkResult {
     pub message: String,
     /// Optional decoded hint for common failure codes.
     pub hint: Option<String>,
+    pub package: Option<String>,
+    pub downgraded: bool,
+    pub downgrade_blocked: bool,
 }
 
 /// `install_apk` — `adb -s <serial> install [-r] <path>`. The frontend uses
@@ -30,8 +33,13 @@ pub async fn install_apk(
     serial: String,
     apk_path: String,
     reinstall: Option<bool>,
+    allow_downgrade: Option<bool>,
 ) -> Result<InstallApkResult, String> {
-    install_apk_impl(state.inner(), &serial, &apk_path, reinstall).await
+    if allow_downgrade.unwrap_or(false) {
+        install_apk_with_downgrade(state.inner(), &serial, &apk_path, reinstall, true).await
+    } else {
+        install_apk_impl(state.inner(), &serial, &apk_path, reinstall).await
+    }
 }
 
 async fn install_apk_impl(
@@ -40,6 +48,16 @@ async fn install_apk_impl(
     apk_path: &str,
     reinstall: Option<bool>,
 ) -> Result<InstallApkResult, String> {
+    install_apk_with_downgrade(state, serial, apk_path, reinstall, false).await
+}
+
+async fn install_apk_with_downgrade(
+    state: &AppState,
+    serial: &str,
+    apk_path: &str,
+    reinstall: Option<bool>,
+    allow_downgrade: bool,
+) -> Result<InstallApkResult, String> {
     let path_buf = PathBuf::from(apk_path);
     if !path_buf.is_file() {
         return Ok(InstallApkResult {
@@ -47,6 +65,9 @@ async fn install_apk_impl(
             path: apk_path.to_string(),
             message: "APK file does not exist".to_string(),
             hint: None,
+            package: None,
+            downgraded: false,
+            downgrade_blocked: false,
         });
     }
 
@@ -55,15 +76,43 @@ async fn install_apk_impl(
     if reinstall.unwrap_or(true) {
         args.push("-r".into());
     }
+    let mut downgrade = allow_downgrade;
+    if downgrade {
+        args.push("-d".into());
+    }
     args.push(apk_path.to_string());
     let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let out = adb
+    let mut out = adb
         .raw_transfer(&args_ref)
         .await
         .map_err(|e| format!("adb install: {e}"))?;
-    let combined = combine_streams(&out.stdout, &out.stderr);
-    let ok = install_succeeded(out.success(), &combined);
+    let mut combined = combine_streams(&out.stdout, &out.stderr);
+    let mut ok = install_succeeded(out.success(), &combined);
+    if !ok
+        && !downgrade
+        && combined.contains("INSTALL_FAILED_VERSION_DOWNGRADE")
+        && !combined.lines().any(|line| line.trim() == "Success")
+    {
+        downgrade = true;
+        args.insert(args.len() - 1, "-d".into());
+        let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+        out = adb
+            .raw_transfer(&args_ref)
+            .await
+            .map_err(|e| format!("adb install: {e}"))?;
+        combined = combine_streams(&out.stdout, &out.stderr);
+        ok = install_succeeded(out.success(), &combined);
+    }
+    let downgrade_blocked = !ok && combined.contains("INSTALL_FAILED_VERSION_DOWNGRADE");
+    let package = if downgrade_blocked {
+        tokio::task::spawn_blocking(move || read_apk_package_id(&path_buf))
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
     let hint = decode_install_error(&combined);
 
     Ok(InstallApkResult {
@@ -71,6 +120,9 @@ async fn install_apk_impl(
         path: apk_path.to_string(),
         message: combined,
         hint,
+        package,
+        downgraded: ok && downgrade,
+        downgrade_blocked,
     })
 }
 
@@ -82,28 +134,56 @@ pub struct DiscoveredApk {
     /// Package id read from the APK's AndroidManifest.xml, when decodable.
     /// Lets the UI flag APKs that are already installed on the device.
     pub package: Option<String>,
+    pub version_code: Option<i64>,
+    pub version_name: Option<String>,
 }
 
-/// Read the `package` attribute from an APK's binary `AndroidManifest.xml`.
-/// Returns `None` if the file isn't a readable APK or the manifest can't be
-/// decoded — best-effort; the install flow doesn't depend on it.
-fn read_apk_package_id(apk_path: &std::path::Path) -> Option<String> {
-    let file = std::fs::File::open(apk_path).ok()?;
-    let mut zip = zip::ZipArchive::new(file).ok()?;
-    let mut manifest = zip.by_name("AndroidManifest.xml").ok()?;
+#[derive(Default)]
+struct ApkManifestInfo {
+    package: Option<String>,
+    version_code: Option<i64>,
+    version_name: Option<String>,
+}
+
+fn read_apk_manifest(apk_path: &std::path::Path) -> ApkManifestInfo {
+    let Ok(file) = std::fs::File::open(apk_path) else {
+        return ApkManifestInfo::default();
+    };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else {
+        return ApkManifestInfo::default();
+    };
+    let Ok(mut manifest) = zip.by_name("AndroidManifest.xml") else {
+        return ApkManifestInfo::default();
+    };
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut manifest, &mut bytes).ok()?;
-    let doc = axmldecoder::parse(&bytes).ok()?;
-    if let Some(axmldecoder::Node::Element(root)) = doc.get_root() {
-        if root.get_tag() == "manifest" {
-            // The manifest is attacker-controlled, and this id is later
-            // interpolated into a device-side shell command (`pm list
-            // packages <id>`) before the user has confirmed anything. An id
-            // that is not a well-formed package name is treated as unreadable.
-            return trusted_package_id(root.get_attributes().get("package").cloned());
-        }
+    if std::io::Read::read_to_end(&mut manifest, &mut bytes).is_err() {
+        return ApkManifestInfo::default();
     }
-    None
+    let Ok(doc) = axmldecoder::parse(&bytes) else {
+        return ApkManifestInfo::default();
+    };
+    let Some(axmldecoder::Node::Element(root)) = doc.get_root() else {
+        return ApkManifestInfo::default();
+    };
+    if root.get_tag() != "manifest" {
+        return ApkManifestInfo::default();
+    }
+    let attrs = root.get_attributes();
+    let attr = |name: &str| -> Option<String> {
+        attrs
+            .get(name)
+            .or_else(|| attrs.get(format!("android:{name}").as_str()))
+            .cloned()
+    };
+    ApkManifestInfo {
+        package: trusted_package_id(attr("package")),
+        version_code: attr("versionCode").and_then(|v| v.parse::<i64>().ok()),
+        version_name: attr("versionName").filter(|v| !v.is_empty()),
+    }
+}
+
+fn read_apk_package_id(apk_path: &std::path::Path) -> Option<String> {
+    read_apk_manifest(apk_path).package
 }
 
 fn trusted_package_id(raw: Option<String>) -> Option<String> {
@@ -260,12 +340,14 @@ pub async fn list_apks_in_folder(folder: String) -> Result<Vec<DiscoveredApk>, S
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let package = read_apk_package_id(&path);
+        let manifest = read_apk_manifest(&path);
         out.push(DiscoveredApk {
             path: path.display().to_string(),
             name,
             size_bytes: metadata.len(),
-            package,
+            package: manifest.package,
+            version_code: manifest.version_code,
+            version_name: manifest.version_name,
         });
         if out.len() >= 50 {
             break;
@@ -477,6 +559,28 @@ mod tests {
             "unknown-result.json",
             &serde_json::json!({ "error": error }),
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_downgrade_rejection_retries_once_with_the_flag() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("simulated.apk");
+        std::fs::write(&file, b"simulation only").unwrap();
+        let (state, calls) = mock_state(result(
+            "",
+            "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]",
+            Some(1),
+        ));
+        let installed = super::install_apk_impl(&state, "mock-tv", file.to_str().unwrap(), None)
+            .await
+            .unwrap();
+        assert!(!installed.ok);
+        assert!(installed.downgrade_blocked);
+        assert!(!installed.downgraded);
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(!calls[0].iter().any(|arg| arg == "-d"));
+        assert!(calls[1].iter().any(|arg| arg == "-d"));
     }
 
     #[tokio::test]

@@ -58,6 +58,7 @@ pub struct AppState {
     /// Names for listed TVs adb cannot query yet. Off unless the app enables
     /// it, so tests and the simulated-device harness never reach the network.
     cast_names: Option<Arc<crate::net::CastNames>>,
+    pub recordings: tokio::sync::Mutex<HashMap<String, crate::adb::TrackedChild>>,
 }
 
 impl AppState {
@@ -79,6 +80,7 @@ impl AppState {
             support_rules: std::sync::RwLock::new(crate::commands::loader::embedded_support_rules()),
             telemetry: Telemetry::disabled(),
             cast_names: None,
+            recordings: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -108,6 +110,24 @@ impl AppState {
             Ok(mut guard) => *guard = rules,
             Err(poisoned) => *poisoned.into_inner() = rules,
         }
+    }
+
+    /// Is a screen recording in progress for `serial`?
+    pub async fn is_recording(&self, serial: &str) -> bool {
+        self.recordings.lock().await.contains_key(serial)
+    }
+
+    /// Register a started recording child for `serial`.
+    pub async fn insert_recording(&self, serial: &str, child: crate::adb::TrackedChild) {
+        self.recordings
+            .lock()
+            .await
+            .insert(serial.to_string(), child);
+    }
+
+    /// Remove and return the recording child for `serial`, if any.
+    pub async fn take_recording(&self, serial: &str) -> Option<crate::adb::TrackedChild> {
+        self.recordings.lock().await.remove(serial)
     }
 
     /// Attach the curated package→name map.

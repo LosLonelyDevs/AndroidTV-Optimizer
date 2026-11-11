@@ -41,14 +41,13 @@ const DEVICE_TABS = [
   "overview",
   "health",
   "media",
-  "launcher",
+  "settings",
   "apps",
   "optimize",
   "tweaks",
   "remote",
   "files",
   "sideload",
-  "snapshot",
   "shell",
 ];
 

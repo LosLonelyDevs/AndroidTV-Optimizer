@@ -1,6 +1,6 @@
 # ATV Optimizer — developer guide
 
-This is the source for **ATV Optimizer**, the official desktop app (Tauri 2 + Rust + Svelte 5), and
+This is the source for the **ATV Optimizer desktop fork** (Tauri 2 + Rust + Svelte 5), and
 for ATV Optimizer for Android in [`mobile/`](mobile/). Both share one audited engine in
 [`crates/core`](crates/core).
 
@@ -8,6 +8,12 @@ for ATV Optimizer for Android in [`mobile/`](mobile/). Both share one audited en
 source and contributing.
 
 [`HANDOFF.md`](HANDOFF.md) carries the current roadmap and priorities; read it before starting work.
+
+Fork controls are composed with the upstream screens: `DesktopAppsTab` supplies
+the unified All apps view, `DesktopSettingsTab` groups the additional controls,
+and `DeviceTools` supplies recording and storage exploration. Install APK retains
+the native installer flow and offers the fork's Folder & version manager.
+The same shared safety engine and active ADB driver serve both views.
 Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Technology choices

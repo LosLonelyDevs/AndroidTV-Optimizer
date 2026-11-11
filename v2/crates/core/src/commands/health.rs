@@ -278,7 +278,7 @@ pub async fn report_all(state: State<'_, AppState>) -> Result<Vec<DeviceReport>,
 
 /// Shared implementation for `health_report` and `report_all`. Takes
 /// `&AppState` so both callers avoid juggling Tauri's State lifetime.
-async fn health_report_for(state: &AppState, serial: &str) -> Result<HealthReport, String> {
+pub async fn health_report_for(state: &AppState, serial: &str) -> Result<HealthReport, String> {
     use std::time::Duration;
     use tokio::time::timeout;
 

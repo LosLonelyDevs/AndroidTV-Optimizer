@@ -106,6 +106,7 @@ async function exercise({ browser, base }) {
   );
 
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", { value: "Linux test browser", configurable: true });
     window.__INSTALLED__ = false;
     window.__OPENED__ = [];
     window.__RELAUNCHED__ = 0;

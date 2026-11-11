@@ -7,7 +7,7 @@
 //! command body run exactly as in the desktop app. Only the adb driver is
 //! swapped for `SimulatedAdb`.
 //!
-//! Built only with `--features e2e`. See `v2/e2e/README.md`.
+//! Built only with `--features e2e --example e2e_server`. See `v2/e2e/README.md`.
 //!
 //! ```text
 //! e2e_server [--port N] [--fixtures DIR]
@@ -314,7 +314,13 @@ impl Server {
             cmd: cmd.clone(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: if cfg!(windows) {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
             body: tauri::ipc::InvokeBody::Json(args.clone()),
             headers: Default::default(),
             invoke_key: INVOKE_KEY.to_string(),

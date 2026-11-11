@@ -296,7 +296,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             v2/target
-          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('v2/Cargo.lock') }}
+          key: ${{ github.repository }}-${{ runner.os }}-cargo-v2-${{ hashFiles('v2/Cargo.lock') }}
 
       - name: cargo fmt
         working-directory: v2
@@ -323,6 +323,18 @@ jobs:
       - name: Vendored transport tests
         working-directory: v2/vendor/adb_client
         run: cargo test --lib
+
+      - name: Windows installer maintenance
+        if: runner.os == 'Windows'
+        working-directory: v2
+        shell: pwsh
+        run: |
+          $env:NSIS_COMPILER = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path -LiteralPath $env:NSIS_COMPILER)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          node tests/installer-maintenance.mjs
 
   frontend:
     if: >-
@@ -550,6 +562,10 @@ jobs:
         working-directory: v2
         run: LAUNCHER_CURATION_EVIDENCE=1 npm run test:launcher-rows
 
+      - name: Desktop fork tools
+        working-directory: v2
+        run: npm run test:fork-tools
+
       - name: Launcher feedback
         working-directory: v2
         run: LAUNCHER_FEEDBACK_EVIDENCE=1 npm run test:launcher-feedback
@@ -659,7 +675,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             v2/target
-          key: ${{ runner.os }}-cargo-v2-e2e-${{ hashFiles('v2/Cargo.lock') }}
+          key: ${{ github.repository }}-${{ runner.os }}-cargo-v2-e2e-${{ hashFiles('v2/Cargo.lock') }}
 
       - name: Setup Node
         uses: actions/setup-node@v5

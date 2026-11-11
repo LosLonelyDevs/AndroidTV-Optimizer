@@ -27,6 +27,7 @@
   import { buildNativeDiscoveryRows, discoveryAddressUsable } from "$lib/native-discovery-rows";
   import NativeConnectionChoices from "$lib/components/NativeConnectionChoices.svelte";
   import Icon from "$lib/components/Icon.svelte";
+  import RecentDevices from "$lib/components/RecentDevices.svelte";
   import { getOpenNonTvIds, setOpenNonTv, idKey } from "$lib/prefs";
   import {
     QUIT_ADB_TIP,
@@ -40,6 +41,7 @@
   import SupportBanner from "$lib/components/SupportBanner.svelte";
 
   let devices = $state<Device[]>([]);
+  let recentPanel = $state<{ reconnect: () => Promise<void> }>();
   let nativeConnections = $state<ScanConnectionProgress>({ pending: [], failed: [] });
   let nativeDiscovery = $state<NativeDiscoveryReport | null>(null);
   let discoveryReceivedAt = $state(0);
@@ -372,6 +374,8 @@
     if (adbBackend === "direct") monitorNativeConnections();
     scanMessage = "Scanning local network…";
     try {
+      await recentPanel?.reconnect();
+      if (disposed) return;
       const r = await api.scanNetwork();
       if (disposed) return;
       scanMessage = r.message;
@@ -1924,6 +1928,17 @@
       </p>
     {/if}
   </HelpDetails>
+{/if}
+
+{#if !adbMissing && !directUnavailable}
+  <RecentDevices bind:this={recentPanel} {devices} disabled={scanBusy || connectBusy || restartBusy} onConnect={async (address) => {
+    if (disposed) return;
+    const result = await api.connectDevice(address);
+    if (disposed) return;
+    if (!result.ok) await showConnectFailure(address, result.message);
+    await refresh();
+    if (!disposed && result.ok) await announceConnected(connectKey(address));
+  }} />
 {/if}
 
 <style>

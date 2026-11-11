@@ -55,7 +55,7 @@ pub(crate) fn list_disabled_package(package: &str) -> String {
 /// Single-quote a value for the device-side shell — the standard `'\''`
 /// idiom (same as `quote_path` in files.rs). Spaces and all shell
 /// metacharacters inside the value are inert once wrapped.
-pub(crate) fn quote_shell_arg(s: &str) -> String {
+pub fn quote_shell_arg(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 

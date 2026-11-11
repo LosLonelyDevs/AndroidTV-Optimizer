@@ -40,7 +40,7 @@ function setHarnessEnvironment() {
 }
 
 async function launcherTab(page) {
-  await page.getByRole("tab", { name: "Launcher" }).click();
+  await page.getByRole("tab", { name: "Launcher", exact: true }).click();
   const rows = page.locator(".launcher-list li");
   await rows.first().waitFor({ timeout: 15000 });
 
@@ -100,7 +100,7 @@ async function launcherTab(page) {
 }
 
 async function snapshotTab(page) {
-  await page.getByRole("tab", { name: /Snapshot/ }).click();
+  await page.locator("#tab-snapshot").click();
   assert.ok(await page.locator("#tabpanel-snapshot .beta-tag").isVisible(), "Snapshots are marked Beta");
 
   // The newest demo snapshot recorded the launcher that is Home right now.
@@ -176,7 +176,7 @@ async function genericHomeStates({ browser, base }) {
       });
       await page.evaluate(state => { window.genericHomeState = state; }, state);
       await page.getByText("NVIDIA SHIELD", { exact: false }).first().click();
-      await page.getByRole("tab", { name: "Launcher" }).click();
+      await page.getByRole("tab", { name: "Launcher", exact: true }).click();
       const row = page.locator(".launcher-list li").filter({ has: page.locator(".launcher-pkg", { hasText: packageId }) });
       await page.locator(".launcher-list li").first().waitFor();
       if (state === "missing") {

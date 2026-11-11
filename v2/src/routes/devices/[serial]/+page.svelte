@@ -78,11 +78,19 @@
   import MediaTab from "$lib/components/MediaTab.svelte";
   import LogsTab from "$lib/components/LogsTab.svelte";
   import ShellTab from "$lib/components/ShellTab.svelte";
+  import DesktopSettingsTab from "$lib/components/DesktopSettingsTab.svelte";
+  import DesktopAppsTab from "$lib/components/DesktopAppsTab.svelte";
+  import QuickInstallTab from "$lib/components/QuickInstallTab.svelte";
+  import FolderApkTab from "$lib/components/FolderApkTab.svelte";
+  import DeviceTools from "$lib/components/DeviceTools.svelte";
+  import ConsoleTab from "$lib/components/ConsoleTab.svelte";
 
   let serial = $derived(decodeURIComponent($page.params.serial ?? ""));
 
-  type Tab = "overview" | "health" | "media" | "launcher" | "apps" | "optimize" | "tweaks" | "remote" | "files" | "snapshot" | "sideload" | "shell" | "logs";
+  type Tab = "overview" | "health" | "media" | "launcher" | "apps" | "optimize" | "tweaks" | "remote" | "files" | "snapshot" | "sideload" | "shell" | "logs" | "settings" | "tools";
   let activeTab = $state<Tab>("overview");
+  let appListView = $state<"all" | "catalog">("catalog");
+  let apkView = $state<"install" | "folders">("install");
 
   // macOS hides an idle scrollbar, so a tab strip that overflows a narrow
   // window looked cut off. Fade whichever edge has more tabs past it.
@@ -107,6 +115,7 @@
 
   let device = $state<Device | null>(null);
   let deviceErr = $state<string | null>(null);
+  let savedTweaksMessage = $state("");
 
   let report = $state<HealthReport | null>(null);
   let reportLoading = $state(false);
@@ -478,6 +487,13 @@
         return;
       }
       device = nextDevice;
+      void api.reapplyBootTweaks(context.serial).then(result => {
+        if (pageContextIsCurrent(context) && request === deviceRequest) {
+          savedTweaksMessage = result.reapplied.length || !result.ok ? result.message : "";
+        }
+      }).catch(error => {
+        if (pageContextIsCurrent(context) && request === deviceRequest) savedTweaksMessage = `Saved settings could not be checked: ${error}`;
+      });
     } catch (e) {
       if (!pageContextIsCurrent(context) || request !== deviceRequest) return;
       deviceErr = String(e);
@@ -857,7 +873,7 @@
     if (!pageContextIsCurrent(context) || request !== enrichmentRequest) return;
     const at = Date.now();
     appMemory = mem.status === "fulfilled" ? mem.value : {};
-    appUsage = usage.status === "fulfilled" ? usage.value : {};
+    appUsage = usage.status === "fulfilled" ? usage.value.entries : {};
     appStorage = storage.status === "fulfilled" ? storage.value : {};
     appMeasures = {
       memory: settled(mem, at),
@@ -2358,11 +2374,13 @@
       { id: "optimize", label: "Optimize", far: false },
       { id: "apps", label: "App List", far: false },
       { id: "launcher", label: "Launcher", far: false },
+      { id: "settings", label: "Settings", far: false },
       { id: "tweaks", label: "Tweaks", far: false },
       { id: "snapshot", label: "Snapshot", far: false },
       { id: "sideload", label: "Install APK", far: false },
       { id: "remote", label: "Remote", far: false },
       { id: "files", label: "Files", far: false },
+      { id: "tools", label: "Device tools", far: false },
       { id: "media", label: "Playback", far: false },
       { id: "logs", label: "Logs", far: false },
       { id: "shell", label: "Shell", far: true },
@@ -2381,6 +2399,7 @@
     {/each}
   </div>
 
+  {#if savedTweaksMessage}<p class="muted" role="status">{savedTweaksMessage}</p>{/if}
   {#if activeTab === "overview"}
     <div class="profile-layout" role="tabpanel" tabindex={0} id="tabpanel-overview" aria-labelledby="tab-overview">
       <div class="card">
@@ -3170,6 +3189,13 @@
       {/if}
     </div>
   {:else if activeTab === "apps"}
+    <div class="header-actions" role="group" aria-label="App list view">
+      <button class:active={appListView === "all"} onclick={() => appListView = "all"}>All apps</button>
+      <button class:active={appListView === "catalog"} onclick={() => appListView = "catalog"}>Catalog review</button>
+    </div>
+    {#if appListView === "all"}
+      <DesktopAppsTab {serial} {device} onChanged={invalidateDeviceCaches} />
+    {:else}
     <div class="card" role="tabpanel" tabindex={0} id="tabpanel-apps" aria-labelledby="tab-apps">
       <div class="card-header">
         <h2><Icon name="apps" size={20} /> App List for {deviceTypeLabel(device.device_type)}</h2>
@@ -3559,6 +3585,7 @@
         </div>
       {/if}
     </div>
+    {/if}
   {:else if activeTab === "snapshot"}
     <div class="card" role="tabpanel" tabindex={0} id="tabpanel-snapshot" aria-labelledby="tab-snapshot">
       <div class="card-header">
@@ -3819,6 +3846,17 @@
       <TweaksTab {serial} onSettingsChanged={invalidateDeviceCaches} />
     </div>
   {/if}
+  {#if visited.settings}
+    <div id="tabpanel-settings" hidden={activeTab !== "settings"}>
+      <DesktopSettingsTab {serial} deviceType={device.device_type} onSettingsChanged={invalidateDeviceCaches} onLauncher={() => activeTab = "launcher"} />
+    </div>
+  {/if}
+  {#if visited.tools}
+    <div hidden={activeTab !== "tools"}><DeviceTools {serial} /></div>
+  {/if}
+  {#if visited.shell && shellAcknowledged}
+    <div hidden={activeTab !== "shell"}><ConsoleTab {serial} active={activeTab === "shell"} /></div>
+  {/if}
   {#if visited.files}
     <div hidden={activeTab !== "files"}>
       <FilesTab {serial} />
@@ -3826,7 +3864,16 @@
   {/if}
   {#if visited.sideload}
     <div hidden={activeTab !== "sideload"}>
+      <div class="header-actions" role="group" aria-label="APK installation view">
+        <button class:active={apkView === "install"} onclick={() => apkView = "install"}>Install APK</button>
+        <button class:active={apkView === "folders"} onclick={() => apkView = "folders"}>Folder & version manager</button>
+      </div>
+      {#if apkView === "install"}
       <SideloadTab {serial} deviceLabel={device?.name ?? ""} />
+      <QuickInstallTab {serial} />
+      {:else}
+        <FolderApkTab {serial} />
+      {/if}
     </div>
   {/if}
   {#if visited.remote}

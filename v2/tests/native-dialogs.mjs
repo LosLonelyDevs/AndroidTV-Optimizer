@@ -88,7 +88,7 @@ async function sourceUsesNoBrowserDialogs() {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) await walk(path);
-      else if (/\.(svelte|ts)$/.test(entry.name) && !/(^|\/)(confirm|demo-mock)\.ts$/.test(path)) {
+      else if (/\.(svelte|ts)$/.test(entry.name) && !/^(confirm|demo-mock)\.ts$/.test(entry.name)) {
         const lines = (await readFile(path, "utf8")).split("\n");
         lines.forEach((line, i) => {
           const code = line.trim();

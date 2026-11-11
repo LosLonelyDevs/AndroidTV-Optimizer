@@ -137,3 +137,8 @@ credentials.json
 secrets.json
 reddit-post.md
 .runtime/
+
+# ===================
+# AI agent workspace — not tracked
+# ===================
+.agents/

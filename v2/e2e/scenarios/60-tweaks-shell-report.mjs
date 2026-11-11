@@ -12,6 +12,34 @@ async function secure(ctx) {
 
 export const scenarios = [
   {
+    name: "settings-preserve-screen-timeout",
+    async run(ctx) {
+      await ctx.reset(shieldScenario());
+      await ctx.shell(SHIELD.serial, "settings put system screen_off_timeout 120000");
+      await ctx.openDevice(SHIELD.key, "system");
+      const page = ctx.page;
+      for (const [key, value] of [["secure.location_mode", "3"], ["global.development_settings_enabled", "1"], ["secure.doze_enabled", "1"]]) {
+        const row = page.locator(".tweak-row:visible").filter({ hasText: key });
+        await row.getByRole("button", { name: /\bOn$/ }).click();
+        await row.getByText(`${key} = ${value}`, { exact: true }).waitFor();
+        ctx.assert.equal((await ctx.device(SHIELD.serial)).settings.system.screen_off_timeout, "120000", `${key} leaves the timeout alone`);
+      }
+      await ctx.tab("display");
+      const timeout = page.locator(".tweak-row:visible").filter({ hasText: "system.screen_off_timeout" });
+      await timeout.getByText("system.screen_off_timeout = 120000", { exact: true }).waitFor();
+      await timeout.getByRole("button", { name: "10 min", exact: true }).click();
+      await timeout.getByText("system.screen_off_timeout = 600000", { exact: true }).waitFor();
+      await timeout.getByRole("button", { name: "2 min", exact: true }).click();
+      await timeout.getByText("system.screen_off_timeout = 120000", { exact: true }).waitFor();
+      await ctx.tab("tweaks");
+      const screensaver = page.locator(".tweak-row:visible").filter({ hasText: "secure.screensaver_components" });
+      await screensaver.getByRole("button", { name: "Basic Daydream" }).click();
+      await screensaver.getByText(`secure.screensaver_components = ${BASIC}`, { exact: false }).waitFor();
+      ctx.assert.equal((await ctx.device(SHIELD.serial)).settings.system.screen_off_timeout, "120000", "changing screensaver preserves its idle timeout");
+      await ctx.step("device controls and screensaver changes preserve the two-minute timeout");
+    },
+  },
+  {
     name: "tweaks-screensaver",
     async run(ctx) {
       await ctx.reset(shieldScenario());

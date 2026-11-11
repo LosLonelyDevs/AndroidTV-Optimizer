@@ -8,12 +8,12 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const v2Root = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = join(v2Root, "scripts/updater-signatures.mjs");
 const { checkManifest, keyIdHex, parsePublicKey, updaterPublicKey, verifySignature } =
-  await import(script);
+  await import(pathToFileURL(script).href);
 
 const fixtures = join(v2Root, "tests/fixtures/updater-signature");
 const data = readFileSync(join(fixtures, "artifact.txt"));
@@ -26,14 +26,14 @@ const unb64 = (value) => Buffer.from(value.trim(), "base64").toString("utf8");
 
 // Installed copies verify every update against this key. Rotating it breaks
 // auto-update for all of them, permanently.
-assert.equal(keyIdHex(parsePublicKey(realKey).keyId), "7111D25D5298C7B1");
+assert.equal(keyIdHex(parsePublicKey(realKey).keyId), "ECA09A250D44916B");
 
 assert.match(verifySignature(data, sig, throwawayKey), /file:artifact\.bin/);
 
 const flipped = Buffer.from(data);
 flipped[0] ^= 1;
 assert.throws(() => verifySignature(flipped, sig, throwawayKey), /does not match the file/);
-assert.throws(() => verifySignature(data, sig, realKey), /signed by key [0-9A-F]{16}, expected 7111D25D5298C7B1/);
+assert.throws(() => verifySignature(data, sig, realKey), /signed by key [0-9A-F]{16}, expected ECA09A250D44916B/);
 
 const tampered = b64(unb64(sig).replace("file:artifact.bin", "file:other.bin"));
 assert.throws(() => verifySignature(data, tampered, throwawayKey), /trusted comment signature/);

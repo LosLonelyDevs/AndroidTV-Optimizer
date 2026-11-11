@@ -1,10 +1,28 @@
 # v2 — current state
 
+## Desktop fork integration, 2026-11-11
+
+This fork is prepared as **2.6.0**, one minor increment above upstream **2.5.0**,
+rebased onto `9bb838f4`. No release tag is created by this integration.
+The fork retains its existing product identifier, updater public key and channel,
+and pinned MSI UpgradeCode. Upstream crate names and native ADB remain current.
+
+The fork's unified table is **App List > All apps**; **Catalog review** keeps
+upstream's current review workflow. Grouped device controls live in the device's
+**Settings** tab. Quick install and Shizuku follow Install APK; recording and
+storage exploration live in **Device tools**. Saved-address retries still require
+the connected device to identify itself, and never merge devices by IP.
+
+Screen recording uses the platform-tools engine because native ADB does not
+implement tracked child processes. Choose it in the application's Settings > ADB
+before recording. Physical-device behavior remains unverified in this integration.
+
 Native desktop ADB takeover: see [NATIVE-ADB-HANDOFF.md](NATIVE-ADB-HANDOFF.md)
 for PR #268, exact candidate provenance, completed checks and remaining native acceptance.
 
-v2 is a shipping desktop app. Latest **published** version: **2.4.1** (2026-10-23). The `v2-2.4.0` tag's build
-failed, so 2.4.0 was never published.
+v2 is a shipping desktop app. This fork's source version is **2.6.0**, prepared
+against upstream **2.5.0**. The imported upstream notes below describe its releases;
+this integration does not publish a fork release.
 
 Installers for macOS/Linux/Windows are built on every `v2-*` tag push via
 `.github/workflows/v2-release.yml`; macOS is also distributed via the Homebrew tap

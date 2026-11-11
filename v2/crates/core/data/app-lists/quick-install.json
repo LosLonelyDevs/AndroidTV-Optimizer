@@ -1,0 +1,62 @@
+[
+  {
+    "name": "TizenTube Cobalt",
+    "package": "io.gh.reisxd.tizentube.cobalt",
+    "description": "Ad-free YouTube with SponsorBlock and DeArrow — the Cobalt build runs on Android TV.",
+    "source": "github",
+    "repo": "reisxd/TizenTubeCobalt",
+    "asset_match": null,
+    "tag": null,
+    "fallback_url": null
+  },
+  {
+    "name": "Flicky",
+    "package": "app.flicky",
+    "description": "F-Droid client built for wide screens and TVs — browse and install open-source apps from the couch.",
+    "source": "github",
+    "repo": "mlm-games/flicky",
+    "asset_match": null,
+    "tag": null,
+    "fallback_url": null
+  },
+  {
+    "name": "MATVT",
+    "package": "io.github.virresh.matvt",
+    "description": "Virtual mouse for Android TV, driven by the remote's d-pad — for apps that were never built for TV.",
+    "source": "github",
+    "repo": "virresh/matvt",
+    "asset_match": "pre2",
+    "tag": "v1.0.7-pre",
+    "fallback_url": null
+  },
+  {
+    "name": "ObtainX",
+    "package": "dev.bikram.obtainx",
+    "description": "Get app updates straight from their GitHub releases — Obtainium reimagined with a TV-friendly UI.",
+    "source": "github",
+    "repo": "bikram-agarwal/ObtainX",
+    "asset_match": null,
+    "tag": null,
+    "fallback_url": null
+  },
+  {
+    "name": "Aurora Store",
+    "package": "com.aurora.store",
+    "description": "Open-source Play Store client — install/update apps without a Google account.",
+    "source": "gitlab",
+    "repo": "AuroraOSS/AuroraStore",
+    "asset_match": null,
+    "tag": null,
+    "fallback_url": null
+  },
+  {
+    "name": "LocalSend",
+    "package": "org.localsend.localsend_app",
+    "description": "AirDrop-style local file sharing between your PC, phone, and TV.",
+    "source": "github",
+    "repo": "localsend/localsend",
+    "asset_match": null,
+    "tag": null,
+    "fallback_url": null
+  }
+]

@@ -174,8 +174,8 @@ export const scenarios = [
   {
     name: "app-report-state-after-direct-optimize",
     async run(ctx) {
-      // Straight to Optimize: the App List inventory was never loaded, so
-      // there is nothing to re-read after the run.
+      // Straight to Optimize: the post-run inventory must still be read even
+      // when the App List was never opened.
       await ctx.reset(shieldScenario());
       const before = (await ctx.device(SHIELD.serial)).packages;
       await ctx.openDevice(SHIELD.key, "optimize");
@@ -196,9 +196,9 @@ export const scenarios = [
       await dialog.waitFor();
       await dialog.getByRole("checkbox").check();
       const state = JSON.parse(await dialog.getByLabel("Report preview").inputValue()).records[0].state;
-      ctx.assert.equal(state.installed, null, "no pre-run installed state from the plan row");
-      ctx.assert.equal(state.enabled, null, "no pre-run enabled state from the plan row");
-      await ctx.step("report state is unknown after a run with no inventory to re-read");
+      ctx.assert.equal(state.installed, true, "post-run inventory confirms the app is installed");
+      ctx.assert.equal(state.enabled, false, "report uses the disabled state, not the pre-run plan row");
+      await ctx.step("report uses fresh inventory after a direct Optimize run");
     },
   },
   {
@@ -257,7 +257,7 @@ export const scenarios = [
       });
       await ctx.openDevice(SHIELD.key, "apps");
       const page = ctx.page;
-      const keep = page.getByRole("button", { name: "Keep", exact: true }).first();
+      const keep = page.locator("tr").filter({ has: page.locator(".state-enabled") }).getByRole("button", { name: "Keep", exact: true }).first();
       await keep.waitFor();
       const pkg = (await keep.locator("xpath=ancestor::tr[1]").locator(".pkg-id").innerText()).trim();
       await keep.click();

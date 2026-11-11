@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime};
 pub const DATA_DIR_NAME: &str = "ATVOptimizer";
 pub const LEGACY_DATA_DIR_NAME: &str = "ShieldOptimizer";
 /// `identifier` in `tauri.conf.json`.
-pub const IDENTIFIER: &str = "com.atvoptimizer.app";
+pub const IDENTIFIER: &str = "com.shieldoptimizer.app";
 pub const LEGACY_IDENTIFIER: &str = "com.shieldoptimizer.app";
 
 pub const ADB_ENV: &str = "ATV_OPTIMIZER_ADB";
@@ -260,7 +260,11 @@ impl Migration {
 pub fn migrate(layout: &Layout) -> Migration {
     let (data_outcome, data_dir) = migrate_data(&layout.data_old, &layout.data_new);
     let record = (data_dir == layout.data_new).then_some(data_dir.as_path());
-    let profile_outcome = migrate_profile(&layout.profile_old, &layout.profile_new, record);
+    let profile_outcome = if layout.profile_old == layout.profile_new {
+        Outcome::AlreadyMigrated
+    } else {
+        migrate_profile(&layout.profile_old, &layout.profile_new, record)
+    };
     Migration {
         data: (
             layout.data_old.clone(),
@@ -928,7 +932,10 @@ mod tests {
     }
 
     fn host(root: &Path) -> Layout {
-        layout(Os::Mac, &root.join("data"), &root.join("home"))
+        let mut paths = layout(Os::Mac, &root.join("data"), &root.join("home"));
+        // Migration fixtures exercise a rename; the fork keeps its profile identity.
+        paths.profile_new = paths.profile_old.with_file_name("com.atvoptimizer.app");
+        paths
     }
 
     const OLD_TELEMETRY: &str = "{\"enabled\":false,\"install_id\":\"abc\"}";
@@ -1004,13 +1011,31 @@ mod tests {
         );
         assert_eq!(
             mac.profile_new,
-            Path::new("/h/Library/WebKit/com.atvoptimizer.app")
+            Path::new("/h/Library/WebKit/com.shieldoptimizer.app")
         );
         for os in [Os::Windows, Os::Linux] {
             let other = layout(os, data, home);
             assert_eq!(other.profile_old, Path::new("/d/com.shieldoptimizer.app"));
-            assert_eq!(other.profile_new, Path::new("/d/com.atvoptimizer.app"));
+            assert_eq!(other.profile_new, Path::new("/d/com.shieldoptimizer.app"));
         }
+    }
+
+    #[test]
+    fn unchanged_identifier_never_moves_the_existing_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let mut l = host(root.path());
+        l.profile_new = l.profile_old.clone();
+        write(
+            &l.profile_old.join("Local Storage/settings"),
+            "existing preferences",
+        );
+        let migration = migrate(&l);
+        assert_eq!(migration.profile.2, Outcome::AlreadyMigrated);
+        assert_eq!(
+            std::fs::read_to_string(l.profile_old.join("Local Storage/settings")).unwrap(),
+            "existing preferences"
+        );
+        assert!(!l.profile_old.join(MARKER).exists());
     }
 
     #[test]
@@ -1475,7 +1500,8 @@ mod tests {
     #[test]
     fn the_profile_copy_skips_caches_and_locks_at_any_depth() {
         let root = tempfile::tempdir().unwrap();
-        let l = layout(Os::Windows, &root.path().join("local"), root.path());
+        let mut l = layout(Os::Windows, &root.path().join("local"), root.path());
+        l.profile_new = l.profile_old.with_file_name("com.atvoptimizer.app");
         let ebwebview = l.profile_old.join("EBWebView");
         write(
             &ebwebview.join("Default/Local Storage/leveldb/000003.log"),

@@ -47,7 +47,7 @@ pub async fn run_shell(
     run_shell_impl(state.inner(), &serial, &command).await
 }
 
-async fn run_shell_impl(
+pub async fn run_shell_impl(
     state: &AppState,
     serial: &str,
     command: &str,

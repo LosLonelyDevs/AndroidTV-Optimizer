@@ -1,21 +1,31 @@
 <script lang="ts">
   import type { AppUsage } from "$lib/types";
-  import { isStaleUsage, usageLabel, usageLabelBare } from "$lib/usage";
+  import { isStaleUsage, usageLabel, usageShortLabel, windowNote } from "$lib/usage";
 
   // "last used" cue for the Review / remove-if-unused decision. Renders nothing
-  // until usage data is loaded. Never-opened and long-idle apps read as stale
-  // (highlighted) — the candidates to remove. Interpretation lives in
-  // $lib/usage so the Optimize review callout can't drift from this badge.
-  let { usage, bare = false }: { usage?: AppUsage; bare?: boolean } = $props();
+  // until usage data is loaded. Long-idle apps read as stale (highlighted) —
+  // the candidates to remove. Interpretation lives in $lib/usage so the
+  // Optimize review callout can't drift from this badge.
+  //
+  // `compact` drops the "last used" prefix, for hosts that put the badge in a
+  // column already headed "Last used". `windowSecs` is device uptime, which
+  // bounds how much history exists at all — without it an app with no record
+  // would be called unused when the device simply rebooted an hour ago.
+  let {
+    usage,
+    compact = false,
+    bare = false,
+    windowSecs = null,
+  }: { usage?: AppUsage; compact?: boolean; bare?: boolean; windowSecs?: number | null } = $props();
 </script>
 
 {#if usage}
   <span
     class="usage-tag"
-    class:stale={isStaleUsage(usage)}
-    data-tip="Last foreground use · Android keeps about a year of history"
+    class:stale={isStaleUsage(usage, windowSecs)}
+    title="Last foreground use from usagestats. {windowNote(windowSecs)}"
   >
-    {bare ? usageLabelBare(usage) : usageLabel(usage)}
+    {compact || bare ? usageShortLabel(usage, windowSecs) : usageLabel(usage, windowSecs)}
   </span>
 {/if}
 
