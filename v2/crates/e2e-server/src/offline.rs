@@ -11,6 +11,14 @@ pub fn allowed(command: &str) -> bool {
             | "telemetry_error"
             | "list_devices"
             | "device_profile"
+            // Reads only the test data directory and uses the simulated ADB driver.
+            | "reapply_boot_tweaks"
+            | "list_boot_tweaks"
+            | "set_boot_tweak"
+            // Read-only queries through the same simulated driver.
+            | "display_report"
+            | "detect_media_apps"
+            | "system_info"
             | "connect_device"
             | "disconnect_device"
             | "pair_device"

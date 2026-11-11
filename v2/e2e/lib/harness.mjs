@@ -39,7 +39,7 @@ function run(cmd, args, opts) {
 
 export function serverBinary() {
   const target = process.env.CARGO_TARGET_DIR || join(V2, "target");
-  return join(target, "debug", "examples", `e2e_server${EXE}`);
+  return join(target, "debug", `e2e_server${EXE}`);
 }
 
 export async function buildServer() {
@@ -212,11 +212,11 @@ export async function scenarioContext({ browser, base, serverUrl, name, colorSch
       if (tab) await ctx.tab(tab);
     },
     async tab(tab) {
-      if (tab === "launcher" || ["display", "audio", "input", "system"].includes(tab)) {
+      if (["display", "audio", "input", "system"].includes(tab)) {
         await page.locator("#tab-settings").click();
-        await page.locator(`#subtab-${tab === "launcher" ? "display" : tab}`).click();
+        await page.locator(`#subtab-${tab === "system" ? "device" : tab}`).click();
       } else {
-        await page.locator(`#tab-${tab === "snapshot" ? "overview" : tab}`).click();
+        await page.locator(`#tab-${tab}`).click();
       }
       await page.waitForLoadState("networkidle");
     },

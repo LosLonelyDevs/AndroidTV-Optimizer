@@ -75,6 +75,7 @@
   /// Endpoints the main list already shows, so Scan details doesn't offer them again.
   const listedEndpoints = $derived(visibleDevices.filter(d => d.status === "device" || d.status === "unauthorized").map(d => d.serial));
   let loading = $state(true);
+  let bootDiscoveryBusy = $state(true);
   let error = $state<string | null>(null);
 
   let connectAddress = $state("");
@@ -1277,10 +1278,17 @@
   // initial refresh and adb is available, kick off a scan so users with
   // already-paired devices don't have to click anything.
   async function bootDiscovery() {
-    await refresh();
-    if (disposed || adbMissing || directUnavailable) return;
-    if (devices.some((d) => d.status === "device")) return;
-    await scan();
+    try {
+      await refresh();
+      if (disposed || adbMissing || directUnavailable) return;
+      if (devices.some((d) => d.status === "device")) {
+        await recentPanel?.reconnect();
+        return;
+      }
+      await scan();
+    } finally {
+      bootDiscoveryBusy = false;
+    }
   }
 
   onMount(() => {
@@ -1931,7 +1939,7 @@
 {/if}
 
 {#if !adbMissing && !directUnavailable}
-  <RecentDevices bind:this={recentPanel} {devices} disabled={scanBusy || connectBusy || restartBusy} onConnect={async (address) => {
+  <RecentDevices bind:this={recentPanel} {devices} disabled={bootDiscoveryBusy || scanBusy || connectBusy || restartBusy} onConnect={async (address) => {
     if (disposed) return;
     const result = await api.connectDevice(address);
     if (disposed) return;

@@ -37,3 +37,88 @@ v2/vendor/adb_client/** sensitive-filename
 v2/vendor/adb_client/src/message_devices/models/adb_rsa_key.rs private-key
 v2/vendor/adb_client/src/models/adb_command.rs internal-service
 v2/vendor/adb_client/src/server/models/device_long.rs internal-service
+
+# Reviewed public upstream 9bb838f4 imports. Device model numbers (D2140,
+# D2325, D2426) are not diff IDs; catalog names are Android package IDs.
+docs/OPTIMIZE-CATALOG-REVIEW-2026-11-10.md diff-id
+v2/tools/catalog-review/progress.json diff-id
+v2/catalogs/cleanyourtv/upstream/examples/amazon-fire-tv-stick-4k-max-2023/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/anker-nebula-d2140/debloat.txt diff-id
+v2/catalogs/cleanyourtv/upstream/examples/anker-nebula-d2140/tv.json diff-id
+v2/catalogs/cleanyourtv/upstream/examples/anker-nebula-d2426/debloat.txt diff-id
+v2/catalogs/cleanyourtv/upstream/examples/anker-nebula-d2426/tv.json diff-id
+v2/catalogs/cleanyourtv/upstream/examples/anker-nebula-mars-3-air/debloat.txt diff-id
+v2/catalogs/cleanyourtv/upstream/examples/anker-nebula-mars-3-air/tv.json diff-id
+v2/catalogs/cleanyourtv/upstream/examples/cecotec-shandao/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/dcolor-gd2/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/insignia-ns55f301na25/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/jvc-android-tv-menlo/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/jvc-lt-43km348/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/nvidia-shield-tv-2017/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/nvidia-shield-tv-2019/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/portronics-beem-470/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/prosonic-bodrum-finch/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/tcl-32sf560-fire-tv/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/tornado-65ua1400e/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/toshiba-65ua2363dg/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/xiaomi-mitv-aesp0/debloat.txt internal-hostname
+v2/catalogs/cleanyourtv/upstream/examples/xiaomi-mitv-mosr1/debloat.txt internal-hostname
+
+# Public simulator/redaction test inputs, synthetic emulator identifiers,
+# evidence paths, and negative URL-validation cases. No live service secrets.
+v2/crates/core/src/adb/parse.rs high-entropy
+v2/crates/core/src/commands/diagnostics.rs internal-service
+v2/crates/core/src/engine/cast_name.rs internal-service
+v2/crates/core/src/engine/log_redact.rs internal-service
+v2/crates/core/src/engine/telemetry.rs internal-service
+v2/crates/core/src/engine/telemetry_diag.rs internal-service
+v2/crates/core/src/telemetry.rs internal-hostname
+v2/crates/core/src/telemetry.rs internal-service
+v2/crates/direct-adb/src/lib.rs high-entropy
+v2/mobile/src/lib/demo-mock.ts internal-service
+v2/mobile/tauri-plugin-atv-adb/android/src/test/java/app/tauri/atvadb/DiscoveryLogicTest.kt internal-service
+v2/mobile/tests/app-report.test.mjs internal-hostname
+v2/mobile/tests/apps-catalog.test.mjs high-entropy
+v2/mobile/tests/export-discoverability.test.mjs high-entropy
+v2/mobile/tests/health-presentation.test.mjs high-entropy
+v2/mobile/tests/helpers/report-fixtures.mjs high-entropy
+v2/mobile/tests/launcher.test.mjs high-entropy
+v2/mobile/tests/telemetry-support.test.mjs internal-hostname
+v2/mobile/tests/tweaks-tab.test.mjs high-entropy
+v2/shared/report-note.ts internal-hostname
+v2/src-tauri/src/commands/diagnostics.rs internal-service
+v2/src-tauri/src/commands/local_network.rs internal-service
+v2/src-tauri/src/rename.rs high-entropy
+v2/telemetry-worker/src/redact.ts internal-hostname
+v2/telemetry-worker/test/diagnostics.test.ts internal-service
+v2/telemetry-worker/test/diagnostics.test.ts high-entropy
+v2/telemetry-worker/test/events.test.ts internal-service
+v2/telemetry-worker/test/redact.test.ts internal-service
+v2/telemetry-worker/test/validate.test.ts internal-service
+v2/tests/app-report.mjs internal-hostname
+v2/tests/app-report.mjs internal-url
+v2/tests/approval-dialog.mjs internal-service
+v2/tests/fork-tools.mjs internal-service
+v2/tests/local-network-notice.mjs internal-service
+v2/tests/native-install-results.mjs internal-service
+v2/tests/native-scan-progress.mjs internal-service
+v2/tests/support-tiers-ui.mjs internal-service
+v2/tests/telemetry-errors-support.mjs internal-service
+
+# PEM header recognition and malformed-key tests, not embedded private keys.
+# Fixtures reuse the already reviewed vendored test_pubkey_gen fixture.
+v2/crates/direct-adb/src/connection_tests.rs private-key
+v2/scripts/upgrade-tests/upgrade_check.py private-key
+v2/src-tauri/src/adb/identity.rs private-key
+v2/src-tauri/src/adb/identity/platform_tools.rs private-key
+v2/src-tauri/src/adb/identity/windows.rs private-key
+v2/vendor/adb_client/src/message_devices/tcp/pairing/mod.rs private-key
+v2/vendor/adb_client/src/message_devices/tcp/preferred_keys.rs private-key
+v2/vendor/adb_client/src/message_devices/tcp/streamed_install.rs private-key
+
+# Environment-derived password assignment and deliberately invalid/test tokens.
+v2/mobile/scripts/setup-play-ci.sh secret-assignment
+v2/telemetry-worker/test/diagnostics.test.ts bearer-token
+v2/telemetry-worker/test/tiers-admin.test.ts bearer-token
+v2/telemetry-worker/test/helpers.ts high-entropy
+v2/telemetry-worker/vitest.config.ts high-entropy
