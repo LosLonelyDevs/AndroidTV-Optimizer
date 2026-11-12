@@ -22,7 +22,7 @@
   const unavailable = $derived(disabledReason ?? (running ? "Wait for the current benchmark to finish, or stop it first."
     : !hardwareId ? "A verified hardware ID is required. Reconnect the TV and refresh its details."
     : !report ? "Refresh RAM successfully before benchmarking." : null));
-  const baselineReason = $derived(unavailable ?? (!candidates.length ? "No eligible reviewed apps are available. Check the Resident apps list for each app's restriction reason."
+  const baselineReason = $derived(unavailable ?? (!candidates.length ? "No eligible reviewed apps are available. Check Apps in RAM for each app's restriction reason."
     : !candidates.some((app) => app.package === packageName) ? "Choose an eligible app from the App menu first." : null));
   const before = $derived(benchmarkSummary(baseline));
   const result = $derived(benchmarkSummary(after));

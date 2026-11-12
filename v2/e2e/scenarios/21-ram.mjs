@@ -1,8 +1,9 @@
 import { SHIELD, shieldScenario } from "../lib/worlds.mjs";
 import { fileURLToPath } from "node:url";
+import { RAM_READ_TIMEOUT_MS } from "../../src/lib/ram-session.ts";
 
 const APP = "com.netflix.ninja";
-async function prepare(ctx) {
+async function resetRamDevice(ctx) {
   await ctx.reset(shieldScenario());
   await ctx.deviceControl(SHIELD.serial, { user_apps: [APP], texts: {
     "dumpsys activity activities": "ACTIVITY MANAGER ACTIVITIES\nmResumedActivity: ActivityRecord{sim u0 com.google.android.tvlauncher/.MainActivity}",
@@ -10,7 +11,12 @@ async function prepare(ctx) {
     "dumpsys media_session": "MEDIA SESSION SERVICE\n",
     "dumpsys meminfo": "Total PSS by process:\n  102,400K: com.netflix.ninja (pid 4242 / activities)\n",
   } });
+}
+
+async function prepare(ctx) {
+  await resetRamDevice(ctx);
   await ctx.openDevice(SHIELD.key, "ram");
+  await ctx.page.getByRole("button", { name: "Refresh RAM", exact: true }).click();
   await ctx.page.getByLabel("Search RAM apps", { exact: true }).fill("Netflix");
   const restrict = ctx.page.getByRole("button", { name: "Restrict Netflix", exact: true });
   await ctx.waitFor(async () => await restrict.isEnabled());
@@ -18,6 +24,95 @@ async function prepare(ctx) {
 }
 
 export const scenarios = [
+  {
+    name: "ram-stop-refresh-and-leave-tab",
+    async run(ctx) {
+      await resetRamDevice(ctx);
+      const page = ctx.page;
+      await ctx.openDevice(SHIELD.key, "ram");
+      ctx.assert.equal((await ctx.invokes()).filter((call) => call.cmd === "ram_report").length, 0);
+      const refresh = page.getByRole("button", { name: "Refresh RAM", exact: true });
+      for (const leaveTab of [false, true]) {
+        await ctx.fault({ scope: "shell", matches: "cat /proc/meminfo", times: 1, effect: { type: "delay", ms: 30000 } });
+        await refresh.click();
+        await page.getByRole("button", { name: "Stop RAM refresh", exact: true }).waitFor();
+        await ctx.waitFor(async () => (await ctx.state()).faults.some((fault) => fault.fired === 1));
+        if (leaveTab) {
+          await page.locator("#tab-overview").click();
+          await ctx.tab("ram");
+        } else {
+          const stop = page.getByRole("button", { name: "Stop RAM refresh", exact: true });
+          for (const theme of ["dark", "light"]) {
+            for (const [width, fontSize] of [[1280, "16px"], [720, "16px"], [720, "32px"]]) {
+              await page.setViewportSize({ width, height: 900 });
+              await page.evaluate(({ theme, fontSize }) => { document.documentElement.dataset.theme = theme; document.documentElement.style.fontSize = fontSize; }, { theme, fontSize });
+              await page.mouse.move(0, 0);
+              await stop.focus();
+              ctx.assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+              ctx.assert.equal(await page.locator(".ram-metrics strong").evaluateAll((values) => values.every((value) => value.scrollWidth <= value.clientWidth)), true);
+              await ctx.step(`RAM progress and Stop ${theme} ${width} ${fontSize}`);
+            }
+          }
+          await stop.press("Enter");
+          await page.getByRole("status").filter({ hasText: "RAM refresh stopped. No settings were changed." }).waitFor({ timeout: 5000 });
+        }
+        await ctx.waitFor(async () => await refresh.isEnabled());
+        await ctx.clearFaults();
+        await refresh.click();
+        await page.getByText("100 MB", { exact: true }).waitFor({ timeout: 5000 });
+        await ctx.waitFor(async () => await refresh.isEnabled());
+        await ctx.step(leaveTab ? "leaving RAM cancels the read and returning stays idle" : "stopped RAM read releases the backend for an immediate retry");
+      }
+      const calls = await ctx.invokes();
+      ctx.assert.equal(calls.filter((call) => call.cmd === "ram_report").length, 4);
+      ctx.assert.equal(calls.filter((call) => call.cmd === "ram_cancel_report").length, 2);
+      ctx.assert.equal(calls.some((call) => ["ram_restrict", "ram_benchmark_trial"].includes(call.cmd)), false);
+      ctx.assert.equal(await page.getByRole("alert").count(), 0);
+    },
+  },
+  {
+    name: "ram-manual-read-timeout-and-retry",
+    async run(ctx) {
+      await resetRamDevice(ctx);
+      const page = ctx.page;
+      await page.clock.install();
+      let held;
+      let reads = 0;
+      await page.route("**/invoke", async (route) => {
+        if (route.request().postDataJSON()?.cmd === "ram_report") {
+          reads++;
+          if (reads === 1) { held = route; return; }
+        }
+        await route.continue();
+      });
+      await ctx.openDevice(SHIELD.key);
+      await page.locator("#tab-ram").click();
+      const refresh = page.getByRole("button", { name: "Refresh RAM", exact: true });
+      ctx.assert.equal(reads, 0);
+      ctx.assert.equal(await refresh.isEnabled(), true);
+      await ctx.step("opening RAM stays idle until Refresh is clicked");
+      await refresh.click();
+      await page.getByRole("status").filter({ hasText: "Reading RAM and app safety from the TV. No settings are being changed." }).waitFor();
+      await page.getByRole("button", { name: "Stop RAM refresh", exact: true }).waitFor();
+      ctx.assert.equal(await refresh.isDisabled(), true);
+      await ctx.step("manual RAM read shows progress and Stop");
+      await page.clock.fastForward(RAM_READ_TIMEOUT_MS + 1000);
+      await page.getByRole("alert").filter({ hasText: "RAM read timed out" }).waitFor();
+      ctx.assert.equal(await refresh.isEnabled(), true);
+      ctx.assert.equal(reads, 1);
+      await ctx.step("a stalled read releases controls for retry");
+      await refresh.click();
+      await page.getByRole("button", { name: "Restrict Netflix", exact: true }).waitFor();
+      await ctx.waitFor(async () => await refresh.isEnabled());
+      await page.getByText("100 MB", { exact: true }).waitFor();
+      await held.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: false, error: "Late response must not replace newer data" }) });
+      await page.clock.runFor(50);
+      ctx.assert.equal(await page.getByRole("alert").count(), 0);
+      ctx.assert.equal(reads, 2);
+      ctx.assert.equal((await ctx.invokes()).some((call) => ["ram_restrict", "ram_benchmark_trial"].includes(call.cmd)), false);
+      await ctx.step("retry succeeds and ignores the old response");
+    },
+  },
   {
     name: "ram-automatic-measure-restrict-compare",
     async run(ctx) {

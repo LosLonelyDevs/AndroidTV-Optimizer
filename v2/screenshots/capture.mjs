@@ -86,6 +86,8 @@ async function captureScreens(page, shot) {
     await shot("health");
     await page.locator("#tab-ram").click();
     await page.getByRole("heading", { name: "Reduce background RAM" }).waitFor();
+    await shot("ram-idle");
+    await page.getByRole("button", { name: "Refresh RAM", exact: true }).click();
     await page.getByRole("button", { name: "Restrict Netflix", exact: true }).waitFor();
     await shot("ram");
     await page.getByRole("button", { name: "Restrict Netflix", exact: true }).click();

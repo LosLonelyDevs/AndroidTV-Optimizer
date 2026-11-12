@@ -266,6 +266,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         devices::rename_device,
         health::health_report,
         commands::ram::ram_report,
+        commands::ram::ram_cancel_report,
         commands::ram::ram_restrict,
         commands::ram::ram_undo,
         commands::ram::ram_benchmark_trial,

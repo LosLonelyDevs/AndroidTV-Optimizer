@@ -43,6 +43,7 @@ this file and shows the newest few sections, dated, from its version button.
 - Android: APK backups are capped at 2 GiB.
 - Android: switching the phone to a right-to-left language no longer drops the TV session.
 - Android: Send Text keeps what you typed when the app silently reconnects to the same TV; it still closes when a different TV answers. A Reboot or Emergency recovery confirmed across a reconnect asks you to confirm again, and a reboot's result is shown even when the TV drops the connection as it goes down.
+- Opening RAM now stays idle until Refresh RAM is clicked. Active reads show progress and a Stop RAM refresh button that cancels the backend read; leaving the tab also cancels it. Stalled reads time out and release controls for retry.
 
 ## v2-2.6.1 - 2026-11-11
 

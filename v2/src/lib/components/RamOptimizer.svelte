@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy } from "svelte";
   import { api } from "$lib/api";
   import { getKeptPackages, setPackageKept } from "$lib/prefs";
-  import { appSummary, comparable, median, sessionSummary } from "$lib/ram-session";
+  import { appSummary, comparable, median, readRamWithTimeout, sessionSummary } from "$lib/ram-session";
   import type { RamApp, RamReport, RamBenchmarkTrial } from "$lib/types";
   import HelpDetails from "./HelpDetails.svelte";
   import Icon from "./Icon.svelte";
@@ -14,6 +14,9 @@
   let { serial, hardwareId, active, suggestionFor }: { serial: string; hardwareId: string | null; active: boolean; suggestionFor: (packageName: string, fallback?: SafetyStatus) => SuggestionValue } = $props();
   let report = $state<RamReport | null>(null);
   let busy = $state(false);
+  let reading = $state(false);
+  let stoppingRead = $state(false);
+  let readRequestId: string | null = null;
   let benchmarking = $state(false);
   let benchmarkCold = $state(false);
   let benchmarkProgress = $state("");
@@ -47,31 +50,51 @@
     return { count: values.length, median: median(values), peak: values.length ? Math.max(...values) : null };
   }
   const unavailable = $derived(!hardwareId ? "A verified hardware ID is required. Reconnect the TV and refresh its details."
+    : reading ? "Reading RAM and app safety from the TV. No settings are being changed."
     : busy ? "Wait for the current RAM operation to finish."
     : recording ? "Stop RAM recording before starting another action." : null);
   const actionReason = $derived(unavailable ?? (benchmarking ? "Wait for the benchmark to finish, or stop it first." : null));
 
   function stop() { recording = null; clearTimeout(timer); }
+  function discardRead() {
+    const requestId = readRequestId;
+    readRequestId = null;
+    reading = false; stoppingRead = false;
+    if (requestId) void api.ramCancelReport(requestId).catch(() => {});
+  }
+  async function stopReading() {
+    stop();
+    const requestId = readRequestId;
+    if (!requestId || stoppingRead) return;
+    stoppingRead = true;
+    try { await api.ramCancelReport(requestId); }
+    catch (e) { if (readRequestId === requestId) error = `Could not stop the RAM read: ${String(e)}`; }
+    finally { if (readRequestId === requestId) stoppingRead = false; }
+  }
   $effect(() => {
     void serial; void hardwareId;
+    discardRead();
     generation++; stop(); report = null; baseline = []; after = []; confirmApp = null;
-    error = ""; message = ""; busy = false;
+    error = ""; message = ""; busy = false; reading = false;
   });
   $effect(() => {
     void serial;
-    if (active && hardwareId) { kept = getKeptPackages(hardwareId); untrack(() => void refresh()); }
-    if (!active) stop();
+    if (active && hardwareId) kept = getKeptPackages(hardwareId);
+    if (!active) { stop(); discardRead(); }
   });
-  onDestroy(() => { generation++; stop(); });
+  onDestroy(() => { generation++; stop(); discardRead(); });
 
-  async function refresh(capture: "baseline" | "after" | null = null) {
-    if (!hardwareId || busy || benchmarking) return;
+  async function refresh(capture: "baseline" | "after" | null = null, preserveMessage = false) {
+    if (!active || !hardwareId || busy || reading || benchmarking) return;
     const ticket = generation;
     const expected = hardwareId;
-    busy = true; error = "";
+    const requestId = crypto.randomUUID();
+    readRequestId = requestId;
+    reading = true; stoppingRead = false; error = "";
+    if (!preserveMessage) message = "";
     try {
-      const next = await api.ramReport(serial, expected);
-      if (ticket !== generation) return;
+      const next = await readRamWithTimeout(() => api.ramReport(serial, expected, requestId));
+      if (ticket !== generation || readRequestId !== requestId) return;
       if (next.hardware_id !== expected) throw new Error("The connected TV changed. Reconnect before continuing.");
       if (report && next.user !== report.user) {
         stop(); baseline = []; after = []; confirmApp = null;
@@ -82,10 +105,15 @@
       }
       report = next;
     } catch (e) {
-      if (ticket === generation) { error = String(e); stop(); }
+      if (ticket === generation && readRequestId === requestId) {
+        if (String(e).includes("RAM read stopped.")) message = "RAM refresh stopped. No settings were changed.";
+        else error = String(e);
+        stop();
+        if (String(e).includes("RAM read timed out.")) void api.ramCancelReport(requestId).catch(() => {});
+      }
     } finally {
-      if (ticket === generation) {
-        busy = false;
+      if (ticket === generation && readRequestId === requestId) {
+        readRequestId = null; reading = false; stoppingRead = false;
         if (recording) {
           if ((recording === "baseline" ? baseline : after).length >= 12) stop();
           else timer = setTimeout(() => void refresh(recording), 15000);
@@ -107,7 +135,7 @@
   }
 
   async function change(app: RamApp, undo = false) {
-    if (!hardwareId || !report || busy || benchmarking) return;
+    if (!hardwareId || !report || busy || reading || benchmarking) return;
     const ticket = generation;
     const identity = hardwareId;
     const user = report.user;
@@ -123,7 +151,7 @@
       if (ticket === generation) { message = result; after = []; }
     } catch (e) { failure = String(e); }
     finally {
-      if (ticket === generation) { busy = false; await refresh(); if (failure) error = failure; }
+      if (ticket === generation) { busy = false; await refresh(null, true); if (failure) error = failure; }
     }
   }
 </script>
@@ -131,11 +159,12 @@
 <div class="ram-stack" role="tabpanel" id="tabpanel-ram" aria-labelledby="tab-ram" tabindex="0">
   <div class="card">
     <div class="ram-heading">
-      <div><h2><Icon name="memory" size={20} /> Reduce background RAM</h2><p class="muted">{recording ? `Recording ${recording === "baseline" ? "baseline" : "comparison"} · ${(recording === "baseline" ? baseline : after).length}/12 samples` : "Choose an eligible app. Measurements run automatically."}</p></div>
+      <div><h2><Icon name="memory" size={20} /> Reduce background RAM</h2>{#if !reading || recording}<p class="muted">{recording ? `Recording ${recording === "baseline" ? "baseline" : "comparison"} · ${(recording === "baseline" ? baseline : after).length}/12 samples` : report ? "Choose an eligible app. Measurements run automatically." : "Click Refresh RAM to load current RAM usage and app suggestions."}</p>{/if}</div>
       <ReasonButton reason={actionReason} onclick={() => refresh()}>Refresh RAM</ReasonButton>
     </div>
     {#if !hardwareId}<p class="error" role="alert">A verified hardware ID is required.</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if reading}<div class="ram-progress"><span role="status">{stoppingRead ? "Stopping RAM refresh…" : "Reading RAM and app safety from the TV. No settings are being changed."}</span><button disabled={stoppingRead} onclick={stopReading}>Stop RAM refresh</button></div>{/if}
     {#if message}<p role="status">{message}</p>{/if}
     {#if benchmarking && busy}<div class="ram-progress" role="status"><span>{benchmarkProgress}</span><button onclick={() => benchmark?.cancel()}>Stop optimization</button></div>{/if}
     <div class="ram-metrics">
@@ -145,6 +174,7 @@
       <div><span>Memory stalls · 10s</span><strong>{report?.reading.pressure_some_avg10 == null ? "Unavailable" : `${report.reading.pressure_some_avg10.toFixed(1)}%`}</strong></div>
     </div>
     <HelpDetails label="About RAM measurements">
+      <p>Refresh RAM reads current RAM and app safety. Opening this tab does not start a read. Stop RAM refresh cancels the read without changing settings. A stalled read also times out so you can retry.</p>
       <p>Cached apps can make switching faster. Available RAM includes memory the kernel estimates it can reclaim. A lower used-RAM number alone does not prove better performance. Swap usage alone does not prove a slowdown.</p>
       <p>Measurements use /proc/meminfo, optional PSI, and PID/UID-verified process PSS. Missing readings stay unavailable. App PSS includes shared memory proportionally; it is not an exact saving if you restrict that app.</p>
       <p>Sessions collect up to 12 samples, 15 seconds apart after each read. Use the same content and app-switching order before and after, and note any reloads or playback problems. Switching tabs stops recording; leaving this device page clears measurements. No raw session data is uploaded.</p>
@@ -154,7 +184,7 @@
     <div class="ram-actions">
       <ReasonButton reason={actionReason ?? (!report ? "Refresh RAM successfully before recording a baseline." : null)} onclick={() => start("baseline")}>Record baseline</ReasonButton>
       <ReasonButton reason={actionReason ?? (baseline.length < 3 ? `Record at least three baseline samples first (${baseline.length}/3 collected).` : null)} onclick={() => start("after")}>Record comparison</ReasonButton>
-      {#if recording}<button onclick={stop}>Stop recording</button>{/if}
+      {#if recording}<button onclick={stopReading}>Stop recording</button>{/if}
     </div>
     </HelpDetails>
     {#if baseline.length || after.length}
@@ -204,7 +234,7 @@
             {#if app.can_undo}<ReasonButton reason={actionReason} onclick={() => change(app, true)} label={`Undo restriction for ${app.name}`}>Undo restriction</ReasonButton>
             {:else}<ReasonButton reason={actionReason ?? (kept.has(app.package) ? "This app is marked Keep. Uncheck Keep before restricting it." : app.blocked_reason)} onclick={() => confirmApp = app} label={`Restrict ${app.name}`}>Restrict background</ReasonButton>{/if}
           </div></td></tr>
-      {:else}<tr><td colspan="4">{busy ? "Reading RAM…" : "No matching apps with verified readings."}</td></tr>{/each}</tbody>
+      {:else}<tr><td colspan="4">{reading ? "Reading RAM…" : report ? "No matching apps with verified readings." : "No RAM reading yet."}</td></tr>{/each}</tbody>
     </table></div>
   </div>
 </div>
@@ -214,7 +244,7 @@
   .ram-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
   .ram-heading h2, .ram-heading h3 { margin: 0; }
   .ram-heading p { margin-bottom: 0; }
-  .ram-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+  .ram-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 1rem; margin: 1.5rem 0; }
   .ram-metrics span, .ram-metrics strong { display: block; }
   .ram-metrics strong { margin-top: 0.35rem; font-size: 1.15rem; }
   .ram-actions, .ram-row-actions { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
