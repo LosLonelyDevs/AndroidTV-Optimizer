@@ -33,6 +33,9 @@ Installers for macOS/Linux/Windows are built on every `v2-*` tag push via
 
 ## Unreleased on `main`
 
+Desktop RAM reads start only after **Refresh RAM** or another explicit user action.
+Active reads show status and **Stop RAM refresh**; Stop or leaving the tab cancels
+the backend read and releases its lock. Reads have a 30-second total deadline.
 Desktop RAM workflow: **Measure and restrict** automatically runs three baseline
 launch trials, verifies the background restriction, then runs three comparison
 trials. Incomplete baselines never apply a restriction; incomplete comparisons

@@ -42,6 +42,7 @@ pub fn allowed(command: &str) -> bool {
             | "rename_device"
             | "health_report"
             | "ram_report"
+            | "ram_cancel_report"
             | "ram_restrict"
             | "ram_undo"
             | "ram_benchmark_trial"

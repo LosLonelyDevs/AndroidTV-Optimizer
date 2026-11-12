@@ -22,6 +22,8 @@ this file and shows the newest few sections, dated, from its version button.
 
 ## Unreleased
 
+- Opening RAM now stays idle until Refresh RAM is clicked. Active reads show progress and a Stop RAM refresh button that cancels the backend read; leaving the tab also cancels it. Stalled reads time out and release controls for retry.
+
 ## v2-2.6.1 - 2026-11-11
 
 - RAM restrictions now automatically record three baseline launch trials, apply and verify the setting, then record three comparison trials. A stopped or failed baseline makes no restriction change; partial comparisons keep Undo available.

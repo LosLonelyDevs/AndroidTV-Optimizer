@@ -3,12 +3,18 @@
 Open a connected TV's **RAM** tab. This desktop feature is included in the fork's
 2.6.1 source. No physical Shield RAM or speed improvement has yet been verified.
 
+The tab starts idle. Click **Refresh RAM** to read current usage and app safety.
+While a read runs, its status and **Stop RAM refresh** are visible. Stop cancels
+the backend read and releases its operation lock without changing TV settings.
+Leaving the tab also cancels the read. A stalled read times out after 30 seconds
+(35 seconds for an unresponsive frontend connection), allowing a retry.
+
 Unavailable action buttons explain why on hover, keyboard focus, or tap. Press
 Escape to dismiss the explanation. Opening it does not perform the blocked action.
 
 ## Measure, change, compare
 
-1. In **Apps in RAM**, review the **Suggestion** shared with Health and the
+1. Click **Refresh RAM**. In **Apps in RAM**, review the **Suggestion** shared with Health and the
    background-eligibility reason beneath it. **Keep** shares the App List's saved
    choice. A missing reading is unknown, not zero RAM or proof of an exit.
 2. Choose **Restrict background**, read the interruption and background-work

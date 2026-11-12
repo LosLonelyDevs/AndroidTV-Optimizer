@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::adb::AdbDriver;
 use crate::engine::ram::{self, BackgroundMode, RamReading};
@@ -15,7 +15,90 @@ use tokio::sync::Mutex;
 use super::{quote_shell_arg, AppState};
 
 static MUTATION: Mutex<()> = Mutex::const_new(());
+static RAM_READS: std::sync::Mutex<BTreeMap<String, RamRead>> =
+    std::sync::Mutex::new(BTreeMap::new());
+const READ_STOPPED: &str = "RAM read stopped. No settings were changed.";
 const OP: &str = "RUN_ANY_IN_BACKGROUND";
+
+struct RamRead {
+    cancel: tokio::sync::watch::Sender<bool>,
+    started: bool,
+    created: Instant,
+}
+
+struct ReadRegistration(String);
+
+impl Drop for ReadRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut reads) = RAM_READS.lock() {
+            reads.remove(&self.0);
+        }
+    }
+}
+
+fn read_requests(
+    request_id: &str,
+) -> Result<std::sync::MutexGuard<'static, BTreeMap<String, RamRead>>, String> {
+    if request_id.is_empty()
+        || request_id.len() > 64
+        || !request_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+    {
+        return Err("Invalid RAM read request.".into());
+    }
+    let mut reads = RAM_READS
+        .lock()
+        .map_err(|_| "RAM read state is unavailable.".to_string())?;
+    reads.retain(|_, read| read.started || read.created.elapsed() < Duration::from_secs(60));
+    if reads.len() >= 64 && !reads.contains_key(request_id) {
+        return Err("Too many RAM read requests. Try again shortly.".into());
+    }
+    Ok(reads)
+}
+
+#[tauri::command]
+pub async fn ram_cancel_report(request_id: String) -> Result<(), String> {
+    let mut reads = read_requests(&request_id)?;
+    // Remember an early Stop even if its report command has not registered yet.
+    let read = reads.entry(request_id).or_insert_with(|| RamRead {
+        cancel: tokio::sync::watch::channel(false).0,
+        started: false,
+        created: Instant::now(),
+    });
+    read.cancel.send_replace(true);
+    Ok(())
+}
+
+async fn cancellable_report(
+    state: &AppState,
+    serial: &str,
+    expected: &str,
+    request_id: String,
+) -> Result<RamReport, String> {
+    let mut cancel = {
+        let mut reads = read_requests(&request_id)?;
+        let read = reads.entry(request_id.clone()).or_insert_with(|| RamRead {
+            cancel: tokio::sync::watch::channel(false).0,
+            started: false,
+            created: Instant::now(),
+        });
+        if read.started {
+            return Err("This RAM read is already running.".into());
+        }
+        read.started = true;
+        read.cancel.subscribe()
+    };
+    let _registration = ReadRegistration(request_id);
+    if *cancel.borrow() {
+        return Err(READ_STOPPED.into());
+    }
+    tokio::select! {
+        biased;
+        _ = cancel.changed() => Err(READ_STOPPED.into()),
+        result = report_with_timeout(state, serial, expected, Duration::from_secs(30)) => result,
+    }
+}
 
 #[derive(Serialize)]
 pub struct RamApp {
@@ -231,8 +314,33 @@ pub async fn ram_report(
     state: State<'_, AppState>,
     serial: String,
     hardware_id: String,
+    request_id: Option<String>,
 ) -> Result<RamReport, String> {
-    report(state.inner(), &serial, &hardware_id).await
+    match request_id {
+        Some(request_id) => {
+            cancellable_report(state.inner(), &serial, &hardware_id, request_id).await
+        }
+        None => {
+            report_with_timeout(
+                state.inner(),
+                &serial,
+                &hardware_id,
+                Duration::from_secs(30),
+            )
+            .await
+        }
+    }
+}
+
+async fn report_with_timeout(
+    state: &AppState,
+    serial: &str,
+    expected: &str,
+    limit: std::time::Duration,
+) -> Result<RamReport, String> {
+    tokio::time::timeout(limit, report(state, serial, expected))
+        .await
+        .map_err(|_| "RAM read timed out. Check the TV connection, then try Refresh RAM. No settings were changed.".to_string())?
 }
 
 async fn report(state: &AppState, serial: &str, expected: &str) -> Result<RamReport, String> {
@@ -692,6 +800,84 @@ mod tests {
 
     fn mode(adb: &SimulatedAdb) -> String {
         adb.world().devices[ID].appops[&format!("{APP}|{OP}")].clone()
+    }
+
+    #[tokio::test]
+    async fn stalled_ram_read_times_out_and_releases_the_operation_lock() {
+        let (_dir, state, adb) = setup();
+        adb.world().faults.push(
+            serde_json::from_value(serde_json::json!({
+                "scope": "shell", "matches": "getprop", "times": 1,
+                "effect": { "type": "delay", "ms": 30000 }
+            }))
+            .unwrap(),
+        );
+        let error = report_with_timeout(&state, ID, ID, std::time::Duration::from_secs(1))
+            .await
+            .err()
+            .expect("stalled read must time out");
+        assert!(error.contains("RAM read timed out"));
+        assert_eq!(adb.world().faults[0].fired, 1);
+        let next = report_with_timeout(&state, ID, ID, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(next.hardware_id, ID);
+        assert_eq!(mode(&adb), "default");
+        assert!(journals(&journal_dir(&state)).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn stopping_before_registration_prevents_the_read() {
+        let (_dir, state, adb) = setup();
+        let request_id = "stop-before-start".to_string();
+        ram_cancel_report(request_id.clone()).await.unwrap();
+        let result = cancellable_report(&state, ID, ID, request_id.clone()).await;
+        assert_eq!(result.err().unwrap(), READ_STOPPED);
+        assert!(!RAM_READS.lock().unwrap().contains_key(&request_id));
+        assert_eq!(mode(&adb), "default");
+        assert!(journals(&journal_dir(&state)).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn stop_cancels_an_active_read_and_releases_the_lock() {
+        let (_dir, state, adb) = setup();
+        adb.world().faults.push(
+            serde_json::from_value(serde_json::json!({
+                "scope": "shell", "matches": "getprop", "times": 1,
+                "effect": { "type": "delay", "ms": 30000 }
+            }))
+            .unwrap(),
+        );
+        let request_id = "stop-active-read".to_string();
+        let cancel = async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while adb.world().faults[0].fired == 0 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            ram_cancel_report(request_id.clone()).await.unwrap();
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(6), async {
+            tokio::join!(
+                cancellable_report(&state, ID, ID, request_id.clone()),
+                cancel
+            )
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.err().unwrap(), READ_STOPPED);
+        assert!(!RAM_READS.lock().unwrap().contains_key(&request_id));
+        assert_eq!(
+            report_with_timeout(&state, ID, ID, Duration::from_secs(5))
+                .await
+                .unwrap()
+                .hardware_id,
+            ID
+        );
+        assert_eq!(mode(&adb), "default");
+        assert!(journals(&journal_dir(&state)).unwrap().is_empty());
     }
 
     #[tokio::test]

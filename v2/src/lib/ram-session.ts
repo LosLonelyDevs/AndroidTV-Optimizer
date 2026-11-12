@@ -1,5 +1,19 @@
 import type { RamBenchmarkTrial, RamReport } from "./types";
 
+export const RAM_READ_TIMEOUT_MS = 35000;
+
+export async function readRamWithTimeout(read: () => Promise<RamReport>, timeoutMs = RAM_READ_TIMEOUT_MS): Promise<RamReport> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("RAM read timed out. Check the TV connection, then try Refresh RAM. No settings were changed.")), timeoutMs);
+      }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
 export function median(values: (number | null)[]): number | null {
   const usable = values.filter((n): n is number => n !== null && Number.isFinite(n)).sort((a, b) => a - b);
   if (!usable.length) return null;

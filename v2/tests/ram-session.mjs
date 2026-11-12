@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { median, sessionSummary, appSummary, comparable, benchmarkSummary, benchmarkComparable, optimizeWithMeasurements } from "../src/lib/ram-session.ts";
+import { median, sessionSummary, appSummary, comparable, benchmarkSummary, benchmarkComparable, optimizeWithMeasurements, readRamWithTimeout } from "../src/lib/ram-session.ts";
 
 const sample = (time, available, pss = 20) => ({ hardware_id: "test-tv", user: 0, sampled_at_ms: time,
   reading: { total_mb: 3000, available_mb: available, pressure_some_avg10: null },
   apps: [{ package: "org.example.app", pss_mb: pss }] });
+const ready = sample(0, 500);
+assert.equal(await readRamWithTimeout(() => Promise.resolve(ready), 100), ready);
+await assert.rejects(readRamWithTimeout(() => Promise.reject(new Error("Disconnected")), 100), /Disconnected/);
+await assert.rejects(readRamWithTimeout(() => new Promise(() => {}), 5), /RAM read timed out/);
 assert.equal(median([null, NaN]), null);
 assert.equal(median([40, 10, 20, 30]), 25);
 const before = [sample(0, 400), sample(15000, 500, null), sample(30000, 600)];

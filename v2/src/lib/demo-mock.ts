@@ -1029,6 +1029,8 @@ export function handle(cmd: string, args: Record<string, unknown>): unknown {
       return null;
     case "health_report":
       return health;
+    case "ram_cancel_report":
+      return null;
     case "ram_report":
       return {
         hardware_id: args.hardwareId, user: 0, sampled_at_ms: Date.now(),
