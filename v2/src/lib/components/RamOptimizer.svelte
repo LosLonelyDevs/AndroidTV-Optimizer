@@ -2,17 +2,24 @@
   import { onDestroy, untrack } from "svelte";
   import { api } from "$lib/api";
   import { getKeptPackages, setPackageKept } from "$lib/prefs";
-  import { appSummary, comparable, sessionSummary } from "$lib/ram-session";
-  import type { RamApp, RamReport } from "$lib/types";
+  import { appSummary, comparable, median, sessionSummary } from "$lib/ram-session";
+  import type { RamApp, RamReport, RamBenchmarkTrial } from "$lib/types";
   import HelpDetails from "./HelpDetails.svelte";
   import Icon from "./Icon.svelte";
   import RamBenchmark from "./RamBenchmark.svelte";
   import ReasonButton from "./ReasonButton.svelte";
+  import AppSuggestion, { type SuggestionValue } from "./AppSuggestion.svelte";
+  import type { SafetyStatus } from "$lib/safety";
 
-  let { serial, hardwareId, active }: { serial: string; hardwareId: string | null; active: boolean } = $props();
+  let { serial, hardwareId, active, suggestionFor }: { serial: string; hardwareId: string | null; active: boolean; suggestionFor: (packageName: string, fallback?: SafetyStatus) => SuggestionValue } = $props();
   let report = $state<RamReport | null>(null);
   let busy = $state(false);
   let benchmarking = $state(false);
+  let benchmarkCold = $state(false);
+  let benchmarkProgress = $state("");
+  let launchBaseline = $state<RamBenchmarkTrial[]>([]);
+  let launchAfter = $state<RamBenchmarkTrial[]>([]);
+  let benchmark = $state<{ optimize: (packageName: string, restrict: () => Promise<string>) => Promise<string>; cancel: () => void }>();
   let error = $state("");
   let message = $state("");
   let baseline = $state<RamReport[]>([]);
@@ -33,6 +40,12 @@
     (showAll || a.pss_mb !== null || a.can_undo || !a.blocked_reason) &&
     `${a.name} ${a.package}`.toLowerCase().includes(query.toLowerCase())));
   const mb = (n: number | null | undefined) => n == null ? "Unavailable" : `${Math.round(n)} MB`;
+  function rowSamples(app: RamApp) {
+    const trials = (launchAfter.length ? launchAfter : launchBaseline).filter((trial) => trial.package === app.package);
+    if (!trials.length) return appSummary(samples, app.package);
+    const values = trials.map((trial) => trial.app_pss_mb).filter((n): n is number => n !== null);
+    return { count: values.length, median: median(values), peak: values.length ? Math.max(...values) : null };
+  }
   const unavailable = $derived(!hardwareId ? "A verified hardware ID is required. Reconnect the TV and refresh its details."
     : busy ? "Wait for the current RAM operation to finish."
     : recording ? "Stop RAM recording before starting another action." : null);
@@ -102,9 +115,11 @@
     busy = true; stop(); error = ""; message = ""; confirmApp = null;
     try {
       kept = getKeptPackages(identity);
+      const transport = serial;
+      if (!undo && !benchmark) throw new Error("Benchmark controls are still loading. Try again.");
       const result = undo
-        ? await api.ramUndo(serial, identity, user, app.package)
-        : await api.ramRestrict(serial, identity, user, app.package, [...kept]);
+        ? await api.ramUndo(transport, identity, user, app.package)
+        : await benchmark!.optimize(app.package, () => api.ramRestrict(transport, identity, user, app.package, [...getKeptPackages(identity)]));
       if (ticket === generation) { message = result; after = []; }
     } catch (e) { failure = String(e); }
     finally {
@@ -116,12 +131,13 @@
 <div class="ram-stack" role="tabpanel" id="tabpanel-ram" aria-labelledby="tab-ram" tabindex="0">
   <div class="card">
     <div class="ram-heading">
-      <div><h2><Icon name="memory" size={20} /> Reduce background RAM</h2><p class="muted">{recording ? `Recording ${recording === "baseline" ? "baseline" : "comparison"} · ${(recording === "baseline" ? baseline : after).length}/12 samples` : "Observe, restrict selected apps, then compare."}</p></div>
+      <div><h2><Icon name="memory" size={20} /> Reduce background RAM</h2><p class="muted">{recording ? `Recording ${recording === "baseline" ? "baseline" : "comparison"} · ${(recording === "baseline" ? baseline : after).length}/12 samples` : "Choose an eligible app. Measurements run automatically."}</p></div>
       <ReasonButton reason={actionReason} onclick={() => refresh()}>Refresh RAM</ReasonButton>
     </div>
     {#if !hardwareId}<p class="error" role="alert">A verified hardware ID is required.</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if message}<p role="status">{message}</p>{/if}
+    {#if benchmarking && busy}<div class="ram-progress" role="status"><span>{benchmarkProgress}</span><button onclick={() => benchmark?.cancel()}>Stop optimization</button></div>{/if}
     <div class="ram-metrics">
       <div><span>Available RAM</span><strong>{mb(report?.reading.available_mb)}</strong></div>
       <div><span>File cache</span><strong>{mb(report?.reading.file_cache_mb)}</strong></div>
@@ -134,11 +150,13 @@
       <p>Sessions collect up to 12 samples, 15 seconds apart after each read. Use the same content and app-switching order before and after, and note any reloads or playback problems. Switching tabs stops recording; leaving this device page clears measurements. No raw session data is uploaded.</p>
       {#each report?.notes ?? [] as note}<p>{note}</p>{/each}
     </HelpDetails>
+    <HelpDetails label="Record a custom RAM workload">
     <div class="ram-actions">
       <ReasonButton reason={actionReason ?? (!report ? "Refresh RAM successfully before recording a baseline." : null)} onclick={() => start("baseline")}>Record baseline</ReasonButton>
       <ReasonButton reason={actionReason ?? (baseline.length < 3 ? `Record at least three baseline samples first (${baseline.length}/3 collected).` : null)} onclick={() => start("after")}>Record comparison</ReasonButton>
       {#if recording}<button onclick={stop}>Stop recording</button>{/if}
     </div>
+    </HelpDetails>
     {#if baseline.length || after.length}
       <div class="table-scroll"><table>
         <thead><tr><th>Session</th><th>Samples / span</th><th>Median available</th><th>Lowest available</th></tr></thead>
@@ -151,35 +169,42 @@
     {/if}
   </div>
 
-  <RamBenchmark {serial} {hardwareId} {report} {active} disabledReason={unavailable} bind:running={benchmarking} />
+  <RamBenchmark bind:this={benchmark} {serial} {hardwareId} {report} {active} disabledReason={unavailable} bind:running={benchmarking} bind:cold={benchmarkCold} bind:baseline={launchBaseline} bind:after={launchAfter} bind:progress={benchmarkProgress} />
 
   {#if confirmApp}
     <div class="card ram-confirm" role="region" aria-label="Confirm background restriction">
       <h3>Restrict {confirmApp.name}?</h3>
       <p>Background downloads, sync, notifications, and playback may stop. You can still open the app. This does not impose a RAM limit or immediately remove cached memory.</p>
       <p>The previous setting will be saved on this computer for Undo.</p>
-      <div class="ram-actions"><ReasonButton reason={actionReason} onclick={() => confirmApp && change(confirmApp)}>Confirm restriction</ReasonButton><ReasonButton reason={busy ? "Wait for the current RAM operation to finish." : null} onclick={() => confirmApp = null}>Cancel</ReasonButton></div>
+      <p>Automatically measures three launches of {confirmApp.name}, applies the restriction, then measures three more. This switches the TV between Home and the app and interrupts what is on screen. A failed or stopped baseline applies no restriction.</p>
+      {#if benchmarkCold}<p><strong>Cold mode force-stops this app before each trial. Playback, downloads, and unsaved work may stop.</strong></p>{:else}<p>Resume mode pre-opens the app. The TV returns to Home after each trial.</p>{/if}
+      <div class="ram-actions"><ReasonButton reason={actionReason} onclick={() => confirmApp && change(confirmApp)}>Measure and restrict</ReasonButton><ReasonButton reason={busy ? "Wait for the current RAM operation to finish." : null} onclick={() => confirmApp = null}>Cancel</ReasonButton></div>
     </div>
   {/if}
 
   <div class="card">
-    <div class="ram-heading"><h3>Resident apps</h3><div class="ram-actions"><input aria-label="Search RAM apps" placeholder="Search apps" bind:value={query} /><label><input type="checkbox" bind:checked={showAll} /> Show all apps</label></div></div>
+    <div class="ram-heading"><h3>Apps in RAM</h3><div class="ram-actions"><input aria-label="Search RAM apps" placeholder="Search apps" bind:value={query} /><label><input type="checkbox" bind:checked={showAll} /> Show all apps</label></div></div>
     <HelpDetails label="Which apps can be restricted?">
       <p>Only reviewed safe, enabled, non-system apps with a unique UID are eligible. Home, the foreground app, media sessions, accessibility and foreground services are protected. Unknown safety readings block restrictions. Keep uses the App List's saved choice.</p>
       <p>Restrictions use Android's background AppOp. Firmware may accept the setting without reducing RAM. Undo remains available after a failed write or restart and restores the saved mode, including Default. Other changes to that mode are not overwritten.</p>
       <p>Sampled app memory shows resident PSS, including cached processes. Missing samples do not mean zero usage or a confirmed process exit.</p>
+      <p>Suggestion matches Health and the App List. The reason below it tells you whether a background restriction is currently allowed. Restricting limits background activity; it does not disable or uninstall the app. Keep apps whose background playback, downloads, sync, or notifications you need.</p>
     </HelpDetails>
     <div class="table-scroll"><table class="ram-apps">
-      <thead><tr><th>App</th><th>Now / sampled median / peak</th><th>Action</th></tr></thead>
+      <thead><tr><th>App</th><th>RAM</th><th>Suggestion</th><th>Action</th></tr></thead>
       <tbody>{#each rows as app (app.package)}
-        {@const stats = appSummary(samples, app.package)}
-        <tr><td><strong>{app.name}</strong><div class="muted package">{app.package}</div><div class="muted">{kept.has(app.package) ? "Marked Keep" : app.blocked_reason ?? "Eligible for review"}</div></td>
-          <td>{mb(app.pss_mb)}<div class="muted">{mb(stats.median)} / {mb(stats.peak)} · {stats.count} readings</div></td>
+        {@const stats = rowSamples(app)}
+        {@const eligibility = kept.has(app.package) ? "Marked Keep" : app.blocked_reason === "Protected, caution, or unreviewed app" ? app.safety?.reason ?? app.blocked_reason : app.blocked_reason ?? "Eligible to limit background activity"}
+        <tr class:ram-eligible={!app.blocked_reason && !kept.has(app.package)}><td><strong>{app.name}</strong><div class="muted package">{app.package}</div>{#if app.can_undo}<span class="ram-saved">Undo available</span>{/if}</td>
+          <td>{#if app.pss_mb !== null}<strong class="ram-value">{mb(app.pss_mb)}</strong>{:else}<span class="muted">No RAM reading</span>{/if}
+            {#if stats.count}<div class="muted">Median {mb(stats.median)} · Peak {mb(stats.peak)} · {stats.count} readings</div>{/if}
+          </td>
+          <td class="ram-suggestion"><AppSuggestion value={suggestionFor(app.package, app.safety ? { status: "ready", verdict: app.safety } : undefined)} kept={kept.has(app.package)} /><div class:ram-allowed={!app.blocked_reason && !kept.has(app.package)} class="ram-eligibility">{eligibility}</div></td>
           <td><div class="ram-row-actions"><label><input type="checkbox" aria-label={`Keep ${app.name}`} checked={kept.has(app.package)} disabled={busy} onchange={(event) => keep(app, event.currentTarget.checked)} /> Keep</label>
             {#if app.can_undo}<ReasonButton reason={actionReason} onclick={() => change(app, true)} label={`Undo restriction for ${app.name}`}>Undo restriction</ReasonButton>
             {:else}<ReasonButton reason={actionReason ?? (kept.has(app.package) ? "This app is marked Keep. Uncheck Keep before restricting it." : app.blocked_reason)} onclick={() => confirmApp = app} label={`Restrict ${app.name}`}>Restrict background</ReasonButton>{/if}
           </div></td></tr>
-      {:else}<tr><td colspan="3">{busy ? "Reading RAM…" : "No matching apps with verified readings."}</td></tr>{/each}</tbody>
+      {:else}<tr><td colspan="4">{busy ? "Reading RAM…" : "No matching apps with verified readings."}</td></tr>{/each}</tbody>
     </table></div>
   </div>
 </div>
@@ -201,6 +226,15 @@
   .package { overflow-wrap: anywhere; }
   .ram-apps td:first-child { min-width: 180px; max-width: 340px; }
   .ram-apps td:nth-child(2) { min-width: 150px; }
+  .ram-apps th { color: var(--accent); background: var(--bg-inset); }
+  .ram-apps tr:nth-child(even) { background: color-mix(in srgb, var(--accent) 3%, var(--bg-surface)); }
+  .ram-apps tr.ram-eligible { box-shadow: inset 3px 0 var(--ok); }
+  .ram-value { color: var(--accent); }
+  .ram-suggestion { min-width: 180px; max-width: 300px; }
+  .ram-eligibility { margin-top: 0.4rem; color: var(--fg-muted); }
+  .ram-allowed { color: var(--ok); }
+  .ram-saved { display: inline-block; margin-top: 0.4rem; padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); color: var(--accent); background: var(--bg-inset); }
+  .ram-progress { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; padding: 0.75rem; border: 1px solid var(--accent); border-radius: var(--radius-md); }
   .ram-apps td:last-child { min-width: 170px; }
   .ram-confirm { border: 1px solid var(--accent); }
   input:not([type]) { max-width: 100%; }

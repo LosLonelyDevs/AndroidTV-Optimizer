@@ -2,7 +2,7 @@
 
 ## Desktop fork integration, 2026-11-11
 
-This fork is prepared as **2.6.0**, one minor increment above upstream **2.5.0**,
+This fork is prepared as **2.6.1**, a patch above the **2.6.0** integration of upstream **2.5.0**,
 rebased onto `9bb838f4`. No release tag is created by this integration.
 The fork retains its existing product identifier, updater public key and channel,
 and pinned MSI UpgradeCode. Upstream crate names and native ADB remain current.
@@ -23,7 +23,7 @@ before recording. Physical-device behavior remains unverified in this integratio
 Native desktop ADB takeover: see [NATIVE-ADB-HANDOFF.md](NATIVE-ADB-HANDOFF.md)
 for PR #268, exact candidate provenance, completed checks and remaining native acceptance.
 
-v2 is a shipping desktop app. This fork's source version is **2.6.0**, prepared
+v2 is a shipping desktop app. This fork's source version is **2.6.1**, prepared
 against upstream **2.5.0**. The imported upstream notes below describe its releases;
 this integration does not publish a fork release.
 
@@ -33,9 +33,12 @@ Installers for macOS/Linux/Windows are built on every `v2-*` tag push via
 
 ## Unreleased on `main`
 
-Desktop RAM workflow: the **RAM** tab records bounded memory sessions, supports
-verified per-app background restrictions with durable undo, and runs three-trial
-resume/cold app-launch benchmarks with before/after deltas. Shared pure parsing
+Desktop RAM workflow: **Measure and restrict** automatically runs three baseline
+launch trials, verifies the background restriction, then runs three comparison
+trials. Incomplete baselines never apply a restriction; incomplete comparisons
+preserve Undo. Manual bounded sessions and reruns remain available. Apps in RAM
+shares Health's Suggestion rendering and shows separate background-eligibility
+reasons. Shared pure parsing
 is in `crates/core/src/engine/ram.rs`; desktop I/O is in
 `src-tauri/src/commands/ram.rs`. Undo journals have their own initial schema 1
 under `data_dir/ram-undo`, keyed in their content by verified hardware ID, Android

@@ -21,6 +21,7 @@ const OP: &str = "RUN_ANY_IN_BACKGROUND";
 pub struct RamApp {
     package: String,
     name: String,
+    safety: Safety,
     pss_mb: Option<f64>,
     blocked_reason: Option<String>,
     can_undo: bool,
@@ -273,6 +274,7 @@ async fn report(state: &AppState, serial: &str, expected: &str) -> Result<RamRep
         .keys()
         .map(|package| RamApp {
             package: package.clone(),
+            safety: safety_for(state, package),
             name: state
                 .app_lists
                 .find(package)
@@ -459,8 +461,18 @@ pub async fn ram_benchmark_trial(
     user: u32,
     package: String,
     cold: bool,
+    return_home: Option<bool>,
 ) -> Result<RamBenchmarkTrial, String> {
-    benchmark_trial(state.inner(), &serial, &hardware_id, user, &package, cold).await
+    benchmark_trial(
+        state.inner(),
+        &serial,
+        &hardware_id,
+        user,
+        &package,
+        cold,
+        return_home.unwrap_or(false),
+    )
+    .await
 }
 
 async fn benchmark_trial(
@@ -470,6 +482,7 @@ async fn benchmark_trial(
     user: u32,
     package: &str,
     cold: bool,
+    return_home: bool,
 ) -> Result<RamBenchmarkTrial, String> {
     let _lock = MUTATION.lock().await;
     if !is_valid_package_name(package) {
@@ -553,6 +566,10 @@ async fn benchmark_trial(
         || shell(&*adb, serial, "am get-current-user").await?.trim() != user.to_string()
     {
         return Err("Device or Android user changed. Trial discarded.".into());
+    }
+    if return_home {
+        shell(&*adb, serial, &guarded(expected, user, "input keyevent 3")).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
     Ok(RamBenchmarkTrial {
         hardware_id: expected.into(),
@@ -734,7 +751,9 @@ mod tests {
             ),
         );
         assert!(restrict(&state, ID, ID, 0, APP, &[]).await.is_err());
-        assert!(benchmark_trial(&state, ID, ID, 0, APP, true).await.is_err());
+        assert!(benchmark_trial(&state, ID, ID, 0, APP, true, false)
+            .await
+            .is_err());
         assert_eq!(mode(&adb), "default");
     }
 
@@ -804,16 +823,20 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn benchmark_reports_real_command_timing_and_memory_without_restricting() {
         let (_dir, state, adb) = setup();
-        let trial = benchmark_trial(&state, ID, ID, 0, APP, false)
+        let trial = benchmark_trial(&state, ID, ID, 0, APP, false, true)
             .await
             .unwrap();
         assert_eq!(trial.timing.total_ms, 120);
         assert_eq!(trial.timing.launch_state.as_deref(), Some("WARM"));
         assert_eq!(mode(&adb), "default");
-        assert!(adb.world().devices[ID]
-            .input_log
-            .iter()
-            .any(|l| l == "keyevent 3"));
+        assert!(
+            adb.world().devices[ID]
+                .input_log
+                .iter()
+                .filter(|l| *l == "keyevent 3")
+                .count()
+                == 2
+        );
         assert!(journals(&journal_dir(&state)).unwrap().is_empty());
     }
 }
