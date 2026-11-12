@@ -1,25 +1,35 @@
 # RAM workflow and benchmarks
 
 Open a connected TV's **RAM** tab. This desktop feature is included in the fork's
-2.6.0 source. No physical Shield RAM or speed improvement has yet been verified.
+2.6.1 source. No physical Shield RAM or speed improvement has yet been verified.
 
 Unavailable action buttons explain why on hover, keyboard focus, or tap. Press
 Escape to dismiss the explanation. Opening it does not perform the blocked action.
 
 ## Measure, change, compare
 
-1. **Record baseline** while repeating the playback/app-switching workload that
-   feels slow. Recording collects up to 12 samples, waiting 15 seconds after
-   each completed read. Stop earlier if needed; comparisons need at least three
-   available-RAM readings in each session.
-2. Review resident apps and their sampled memory. **Keep** shares the App List's
-   saved choice. A missing reading is unknown, not zero RAM or proof of an exit.
-3. **Restrict background** on an eligible app, read the consequences, and confirm.
-   Android may stop its background downloads, sync, notifications, and playback.
-   The app stays installed and can still be opened.
-4. **Record comparison** using the same workload. Compare available RAM and
-   app behavior, including unwanted reloads and broken background functions.
-   Use **Undo restriction** to restore the saved setting.
+1. In **Apps in RAM**, review the **Suggestion** shared with Health and the
+   background-eligibility reason beneath it. **Keep** shares the App List's saved
+   choice. A missing reading is unknown, not zero RAM or proof of an exit.
+2. Choose **Restrict background**, read the interruption and background-work
+   consequences, then choose **Measure and restrict** once.
+3. The app automatically measures three launches, applies and verifies the
+   restriction, then measures three more. It returns to Home after every trial.
+   A failed, mismatched, or stopped baseline makes no restriction change. If the
+   comparison fails or stops after the change, the restriction stays applied and
+   **Undo restriction** remains available.
+4. Results appear after the first baseline trial. Compare launch times, available
+   RAM, and app PSS. Missing metrics remain unknown and are never treated as zero.
+
+Apps in RAM includes active and cached processes; it does not mean every app is
+doing work. Eligible installed apps without verified memory readings can also
+appear so they can be measured. Suggestion retains Health's removal advice;
+background eligibility is a separate, stricter check. Restricting limits
+background activity without disabling or uninstalling the app.
+
+For a custom playback/app-switching workload, expand **Record a custom RAM
+workload**. Manual recording collects up to 12 samples with 15-second waits and
+requires at least three available-RAM readings in each session for comparison.
 
 The app verifies the restriction setting separately from its effect. A matching
 readback does not establish RAM savings. Restrictions are not per-app RAM caps
@@ -29,7 +39,9 @@ readings; swap usage alone does not establish harmful memory pressure.
 
 ## Benchmark the delta
 
-Choose a reviewed app under **Before / after benchmark**, then a launch mode:
+Automatic optimization uses the app being restricted and defaults to Resume.
+After a baseline exists, **Before / after benchmark** also offers manual reruns
+and a launch-mode selector:
 
 - **Resume (pre-open):** opens the app, returns Home, waits two seconds, and times
   the next launch. Android may report a warm, hot, or cold launch depending on
@@ -39,8 +51,8 @@ Choose a reviewed app under **Before / after benchmark**, then a launch mode:
   and possible loss of unsaved work or background activity.
 
 Each run performs three trials, with a three-second settling period before RAM
-sampling. Apply the selected change between **Benchmark baseline** and
-**Benchmark comparison**. Comparison reuses the baseline app and mode. Keep
+sampling. The automatic flow applies the restriction between runs; manual
+comparison reuses the baseline app and mode. Keep
 content, app settings, device temperature, and other workloads similar.
 
 Results show median launch time, observed min/max, median available RAM, and

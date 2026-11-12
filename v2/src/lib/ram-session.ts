@@ -49,3 +49,39 @@ export function benchmarkComparable(before: RamBenchmarkTrial[], after: RamBench
     t.cold === first.cold && t.firmware === first.firmware && t.app_version === first.app_version &&
     t.timing.launch_state === first.timing.launch_state);
 }
+
+export type RamPhase = "baseline" | "restricting" | "after";
+
+export async function optimizeWithMeasurements(options: {
+  trial: () => Promise<RamBenchmarkTrial>;
+  restrict: () => Promise<string>;
+  cancelled: () => boolean;
+  onPhase: (phase: RamPhase, trial: number) => void;
+  onTrial: (phase: "baseline" | "after", trial: RamBenchmarkTrial) => void;
+}): Promise<string> {
+  let phase: RamPhase = "baseline";
+  const before: RamBenchmarkTrial[] = [];
+  const check = () => { if (options.cancelled()) throw new Error("Stopped."); };
+  try {
+    for (let i = 0; i < 3; i++) {
+      check(); options.onPhase(phase, i + 1);
+      const trial = await options.trial();
+      check(); before.push(trial); options.onTrial("baseline", trial);
+    }
+    if (!benchmarkComparable(before, before)) throw new Error("Baseline trials did not match. Try again under the same conditions.");
+    check(); phase = "restricting"; options.onPhase(phase, 0);
+    const result = await options.restrict();
+    phase = "after";
+    for (let i = 0; i < 3; i++) {
+      check(); options.onPhase(phase, i + 1);
+      const trial = await options.trial();
+      check(); options.onTrial("after", trial);
+    }
+    return result;
+  } catch (error) {
+    const consequence = phase === "baseline" ? "Baseline incomplete. No restriction was applied."
+      : phase === "restricting" ? "The restriction could not be verified. Check Undo before retrying."
+      : "Restriction applied. Comparison incomplete; Undo is available.";
+    throw new Error(`${consequence} ${String(error)}`);
+  }
+}

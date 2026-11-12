@@ -3,9 +3,7 @@
   import { onDestroy, onMount } from "svelte";
   import Icon from "$lib/components/Icon.svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "$lib/api";
-  import sideloadCatalog from "$lib/sideload-catalog.json";
   import type { ApkInspection, DiscoveredApk } from "$lib/types";
 
   let { serial, deviceLabel = "" }: { serial: string; deviceLabel?: string } = $props();
@@ -207,15 +205,7 @@
     return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
   }
 
-  const ISSUES_URL = "https://github.com/bryanroscoe/shield_optimizer/issues/new";
 
-  async function openDownloadPage(url: string) {
-    try {
-      await openUrl(url);
-    } catch (e) {
-      sideloadResult = `Open link failed: ${e}`;
-    }
-  }
 
   onMount(() => {
     const last = localStorage.getItem("shieldopt.lastApkFolder");
@@ -410,42 +400,6 @@
 
     </div>
 
-    <!-- The board gives the catalog a permanent rail rather than a disclosure.
-         It is the answer to "what do I even install", so it should not be a
-         thing you have to know to open. -->
-    <aside class="sideload-rail">
-      <p class="rail-label">Popularly requested sideloads · {sideloadCatalog.length}</p>
-      <ul class="catalog-list">
-        {#each sideloadCatalog as entry (entry.package)}
-          <li>
-            <div class="catalog-text">
-              <div class="apk-name">{entry.name}</div>
-              <div class="muted small">{entry.description}</div>
-              <div class="muted small mono catalog-pkg">{entry.package}</div>
-            </div>
-            {#if apkInstallState[entry.package] === "enabled"}
-              <span class="tag installed">INSTALLED</span>
-            {:else if apkInstallState[entry.package] === "disabled"}
-              <span class="tag disabled">INSTALLED (disabled)</span>
-            {/if}
-            <!-- This opens a web page; it does not download or install
-                 anything, so it carries no download glyph. -->
-            <button
-              class="catalog-get"
-              onclick={() => openDownloadPage(entry.url)}
-              title={`Open the official download page in your browser — ${entry.url}`}
-              aria-label={`Open the official download page for ${entry.name}`}
-            ><Icon name="open_in_new" size={16} /> <span>Get</span></button>
-          </li>
-        {/each}
-      </ul>
-      <p class="muted small rail-note">
-        Official download pages. Download a file, then choose Pick file.
-        <button class="link-button" onclick={() => openDownloadPage(ISSUES_URL)}>
-          Suggest one on GitHub
-        </button>
-      </p>
-    </aside>
   </div>
 </div>
 
@@ -469,16 +423,14 @@
   .header-sub {
     margin: 0;
   }
-  /* What you have on the left, what you could have on the right — board 11.9. */
   .sideload-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    grid-template-columns: minmax(0, 1fr);
     gap: 1.5rem;
     align-items: start;
     margin-top: 1rem;
   }
-  .sideload-main,
-  .sideload-rail {
+  .sideload-main {
     min-width: 0;
   }
   .rail-label {
@@ -488,23 +440,6 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--fg-muted);
-  }
-  .sideload-rail .rail-label {
-    margin-top: 0;
-  }
-  .rail-note {
-    margin-top: 0.7rem;
-  }
-  /* Reads as the link it is, inside the sentence, rather than as a button
-     parked under it. */
-  .link-button {
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: var(--accent);
-    text-decoration: underline;
-    cursor: pointer;
   }
   .saved-folder-head {
     display: flex;
@@ -538,33 +473,6 @@
     border-radius: var(--radius-md);
     background: var(--bg-inset);
     color: var(--ok);
-  }
-  .catalog-text {
-    flex: 1;
-    min-width: 0;
-  }
-  .catalog-pkg {
-    overflow-wrap: anywhere;
-  }
-  /* A link out, not an install — the icon says "opens elsewhere", and the title says
-     where from, because sideloading somebody else's build deserves a name. */
-  .catalog-get {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.25rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--accent);
-    font-size: 0.78rem;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .catalog-get:hover {
-    border-color: var(--border);
-    background: var(--bg-button-hover);
   }
 
   .small {
@@ -655,12 +563,6 @@
     font-size: 0.88rem;
     word-break: break-all;
   }
-  .catalog-text .apk-name {
-    font-family: var(--sans);
-    font-size: 0.92rem;
-    font-weight: 600;
-    word-break: normal;
-  }
   /* Nothing scanned yet is a state, not a blank half-screen. */
   .sideload-empty {
     display: flex;
@@ -734,22 +636,5 @@
   .sideload-empty strong {
     color: var(--fg-secondary);
     font-weight: 600;
-  }
-  .catalog-list {
-    list-style: none;
-    padding: 0;
-    margin: 0.5rem 0 0;
-  }
-  .catalog-list li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.6rem 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .catalog-list li button {
-    white-space: nowrap;
-    flex-shrink: 0;
   }
 </style>

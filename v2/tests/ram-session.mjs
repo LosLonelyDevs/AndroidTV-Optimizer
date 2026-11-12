@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { median, sessionSummary, appSummary, comparable, benchmarkSummary, benchmarkComparable } from "../src/lib/ram-session.ts";
+import { median, sessionSummary, appSummary, comparable, benchmarkSummary, benchmarkComparable, optimizeWithMeasurements } from "../src/lib/ram-session.ts";
 
 const sample = (time, available, pss = 20) => ({ hardware_id: "test-tv", user: 0, sampled_at_ms: time,
   reading: { total_mb: 3000, available_mb: available, pressure_some_avg10: null },
@@ -23,4 +23,30 @@ for (const changes of [{ firmware: "changed" }, { app_version: "2" }, { cold: tr
   assert.equal(benchmarkComparable(b, [{ ...a[0], ...changes }, ...a.slice(1)]), false);
 }
 assert.equal(benchmarkComparable(b, a.slice(1)), false);
-console.log("PASS: RAM samples, missing metrics, benchmark deltas and comparison identity");
+for (const failure of [null, "baseline", "comparison", "stop", "mismatch"]) {
+  const calls = [];
+  let stopped = false;
+  let count = 0;
+  const run = optimizeWithMeasurements({
+    trial: async () => {
+      calls.push("trial"); count++;
+      if ((failure === "baseline" && count === 2) || (failure === "comparison" && count === 4)) throw new Error("Reading failed");
+      return { ...trial(100), app_version: failure === "mismatch" && count === 3 ? "2" : "1" };
+    },
+    restrict: async () => { calls.push("restrict"); return "Verified"; },
+    cancelled: () => stopped,
+    onPhase: () => {},
+    onTrial: (phase) => { if (failure === "stop" && phase === "baseline") stopped = true; },
+  });
+  if (failure === null) {
+    assert.equal(await run, "Verified");
+    assert.deepEqual(calls, ["trial", "trial", "trial", "restrict", "trial", "trial", "trial"]);
+  } else if (failure === "comparison") {
+    await assert.rejects(run, /Restriction applied. Comparison incomplete; Undo is available/);
+    assert.equal(calls.filter((call) => call === "restrict").length, 1);
+  } else {
+    await assert.rejects(run, /No restriction was applied/);
+    assert.equal(calls.includes("restrict"), false);
+  }
+}
+console.log("PASS: RAM metrics, automatic before/change/after order, cancellation and failure safety");

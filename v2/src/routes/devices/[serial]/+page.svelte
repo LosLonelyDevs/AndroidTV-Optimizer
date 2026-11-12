@@ -85,6 +85,7 @@
   import DeviceTools from "$lib/components/DeviceTools.svelte";
   import ConsoleTab from "$lib/components/ConsoleTab.svelte";
   import RamOptimizer from "$lib/components/RamOptimizer.svelte";
+  import AppSuggestion, { type SuggestionValue } from "$lib/components/AppSuggestion.svelte";
 
   let serial = $derived(decodeURIComponent($page.params.serial ?? ""));
 
@@ -1308,14 +1309,15 @@
   /// same inputs — so the two screens cannot disagree. Another installed
   /// package gets its verdict. A name no installed package carries is a
   /// process, and a process is not something you remove.
-  type MemorySuggestion =
-    | { kind: "recommendation"; rec: Recommendation }
-    | { kind: "verdict"; status: SafetyStatus | undefined }
-    | { kind: "process"; status: SafetyStatus | undefined };
+  type MemorySuggestion = SuggestionValue;
 
   function memorySuggestion(m: MemoryEntry): MemorySuggestion {
     const pkg = confirmedPackage(m, memoryConfirmed);
     if (pkg === null) return { kind: "process", status: memorySafety[m.process] };
+    return packageSuggestion(pkg, memorySafety[m.process]);
+  }
+
+  function packageSuggestion(pkg: string, fallback = packageSafety[pkg]): SuggestionValue {
     // Until the catalog lands we cannot tell a catalog app from any other
     // package, and a verdict that flips to a recommendation a second later
     // is a column that cannot be trusted at a glance.
@@ -1327,7 +1329,7 @@
         rec: recommendation(entry, appStates[pkg] ?? null, packageSafety[pkg], installSource(pkg, userInstalled)),
       };
     }
-    return { kind: "verdict", status: memorySafety[m.process] };
+    return { kind: "verdict", status: fallback };
   }
 
   /// Open the App List on exactly this package.
@@ -2121,7 +2123,7 @@
       if (!appsLoaded && !appsLoading) loadApps();
     }
     if (activeTab === "launcher" && !launchersLoaded && !launcherLoading) loadLauncher();
-    if (activeTab === "apps" && !appsLoaded && !appsLoading) loadApps();
+    if ((activeTab === "apps" || activeTab === "ram") && !appsLoaded && !appsLoading) loadApps();
     if (activeTab === "snapshot" && !snapshotsLoaded) loadSnapshots();
   });
 
@@ -2831,14 +2833,7 @@
                     data-verdict={lookup?.status === "ready" ? lookup.verdict.kind : (lookup?.status ?? "unavailable")}
                     title={safetyReason(lookup)}
                   >
-                    {#if suggestion.kind === "recommendation"}
-                      {@const kept = appPkg !== null && keptPackages.has(appPkg) && suggestion.rec.kind !== "restore"}
-                      <span class={`suggestion suggestion--${kept ? "keep" : suggestion.rec.kind}`}>{kept ? "Kept" : suggestion.rec.label}</span>
-                    {:else if suggestion.kind === "process"}
-                      <span class="suggestion suggestion--keep">Not an app</span>
-                    {:else}
-                      <span class={safetyClass(lookup)}>{safetyLabel(lookup)}</span>
-                    {/if}
+                    <AppSuggestion value={suggestion} kept={appPkg !== null && keptPackages.has(appPkg)} />
                   </td>
                 </tr>
               {/each}
@@ -3857,7 +3852,7 @@
     </div>
   {/if}
   {#if visited.ram}
-    <div hidden={activeTab !== "ram"}><RamOptimizer {serial} hardwareId={device.properties?.serial_number ?? null} active={activeTab === "ram"} /></div>
+    <div hidden={activeTab !== "ram"}><RamOptimizer {serial} hardwareId={device.properties?.serial_number ?? null} active={activeTab === "ram"} suggestionFor={packageSuggestion} /></div>
   {/if}
   {#if visited.tools}
     <div hidden={activeTab !== "tools"}><DeviceTools {serial} /></div>
@@ -4328,30 +4323,6 @@
      advice about an action, and the verdict chip vocabulary is reserved for
      how safe that action is. Amber is "look at this first", as it is on a
      review row; everything that needs nothing recedes. */
-  .suggestion {
-    display: inline-block;
-    padding: 0.1rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    font-size: 0.75rem;
-    white-space: nowrap;
-    color: var(--fg-secondary);
-  }
-  .suggestion--act {
-    color: var(--fg-primary);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .suggestion--review,
-  .suggestion--unavailable {
-    color: var(--warn);
-    background: var(--warn-surface);
-    border-color: var(--warn-border);
-  }
-  .suggestion--done,
-  .suggestion--keep,
-  .suggestion--restore {
-    color: var(--fg-muted);
-  }
   @media (max-width: 1100px) {
     .health-grid {
       grid-template-columns: minmax(0, 1fr);

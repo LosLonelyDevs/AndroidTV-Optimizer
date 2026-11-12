@@ -22,6 +22,14 @@ this file and shows the newest few sections, dated, from its version button.
 
 ## Unreleased
 
+## v2-2.6.1 - 2026-11-11
+
+- RAM restrictions now automatically record three baseline launch trials, apply and verify the setting, then record three comparison trials. A stopped or failed baseline makes no restriction change; partial comparisons keep Undo available.
+- Benchmark results appear after the first baseline reading. App, launch mode, and benchmark buttons share aligned heights and a row where space permits.
+- Renamed Resident apps to Apps in RAM, reused Health's Suggestion column, added palette colors and explicit background-protection reasons, and removed repeated missing readings.
+- Removed the redundant Popularly requested sideloads list while retaining the install controls.
+- Added accessible reasons for unavailable RAM actions and fixed narrow-screen table overflow.
+
 ## v2-2.6.0 - 2026-11-11
 
 - Rebase the desktop fork onto upstream `9bb838f4`, including native ADB, snapshot schema 4, verified restore outcomes, and the expanded safety catalog.

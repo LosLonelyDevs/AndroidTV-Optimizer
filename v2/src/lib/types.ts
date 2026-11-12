@@ -5,6 +5,7 @@ import type { SurroundMode } from "../../shared/media";
 import type { SupportInfo } from "../../shared/support";
 import type { TemperatureReading } from "../../shared/health";
 import type { LocalNetworkStatus } from "./adb-errors";
+import type { Safety } from "../../shared/safety";
 
 export type ConnectionType = "network" | "usb";
 export type DeviceStatus = "device" | "unauthorized" | "offline";
@@ -916,6 +917,7 @@ export interface RamReading {
 export interface RamApp {
   package: string;
   name: string;
+  safety?: Safety;
   pss_mb: number | null;
   blocked_reason: string | null;
   can_undo: boolean;

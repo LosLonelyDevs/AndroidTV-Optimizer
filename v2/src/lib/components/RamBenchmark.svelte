@@ -5,17 +5,17 @@
   import { benchmarkComparable, benchmarkSummary } from "$lib/ram-session";
   import HelpDetails from "./HelpDetails.svelte";
   import ReasonButton from "./ReasonButton.svelte";
+  import { optimizeWithMeasurements } from "$lib/ram-session";
 
-  let { serial, hardwareId, report, disabledReason, active, running = $bindable(false) }: {
+  let { serial, hardwareId, report, disabledReason, active, running = $bindable(false), cold = $bindable(false),
+    baseline = $bindable<RamBenchmarkTrial[]>([]), after = $bindable<RamBenchmarkTrial[]>([]), progress = $bindable("") }: {
     serial: string; hardwareId: string | null; report: RamReport | null; disabledReason: string | null; active: boolean; running?: boolean;
+    cold?: boolean; baseline?: RamBenchmarkTrial[]; after?: RamBenchmarkTrial[]; progress?: string;
   } = $props();
   let packageName = $state("");
-  let cold = $state(false);
-  let baseline = $state<RamBenchmarkTrial[]>([]);
-  let after = $state<RamBenchmarkTrial[]>([]);
   let pending = $state<"baseline" | "after" | null>(null);
   let error = $state("");
-  let progress = $state("");
+  let automatic = $state(false);
   let cancelled = false;
   let generation = 0;
   const candidates = $derived((report?.apps ?? []).filter((a) => !a.blocked_reason || a.blocked_reason === "Foreground app"));
@@ -34,6 +34,29 @@
   $effect(() => { if (!active) { cancelled = true; pending = null; } });
   onDestroy(() => { cancelled = true; generation++; });
 
+  export function cancel() { cancelled = true; progress = "Stopping after the current step…"; }
+
+  export async function optimize(selected: string, restrict: () => Promise<string>): Promise<string> {
+    if (!hardwareId || !report || running || !active) throw new Error("Refresh the TV's RAM details before optimizing.");
+    const identity = hardwareId, user = report.user, transport = serial, ticket = generation, mode = cold;
+    packageName = selected; baseline = []; after = []; pending = null;
+    running = true; automatic = true; cancelled = false; error = "";
+    try {
+      const result = await optimizeWithMeasurements({
+        trial: () => api.ramBenchmarkTrial(transport, identity, user, selected, mode, true),
+        restrict,
+        cancelled: () => cancelled || ticket !== generation || !active,
+        onPhase: (phase, trial) => progress = phase === "restricting" ? "Applying and verifying the background restriction…" : `${phase === "baseline" ? "Baseline" : "Comparison"}: trial ${trial} of 3`,
+        onTrial: (phase, trial) => { if (phase === "baseline") baseline = [...baseline, trial]; else after = [...after, trial]; },
+      });
+      if (ticket === generation) progress = "Optimization and measurements complete.";
+      return result;
+    } catch (e) {
+      if (ticket === generation) { error = String(e); progress = ""; }
+      throw e;
+    } finally { if (ticket === generation) running = false; }
+  }
+
   async function run() {
     if (!pending || !hardwareId || !report || unavailable) return;
     const phase = pending;
@@ -41,7 +64,7 @@
     const mode = phase === "after" ? baseline[0]?.cold : cold;
     if (!selected || mode === undefined) return;
     const identity = hardwareId, user = report.user, ticket = generation;
-    pending = null; running = true; cancelled = false; error = "";
+    pending = null; running = true; automatic = false; cancelled = false; error = "";
     if (phase === "baseline") { baseline = []; after = []; } else after = [];
     try {
       for (let i = 0; i < 3 && !cancelled; i++) {
@@ -56,6 +79,7 @@
   }
 </script>
 
+{#if baseline.length || after.length}
 <div class="card benchmark">
   <h3>Before / after benchmark</h3>
   <div class="benchmark-controls">
@@ -65,12 +89,12 @@
     <label>Launch mode<select aria-label="Benchmark launch mode" bind:value={cold} disabled={!!unavailable}><option value={false}>Resume (pre-open)</option><option value={true}>Cold (force-stop)</option></select></label>
     <div class="benchmark-actions"><ReasonButton reason={baselineReason} onclick={() => pending = "baseline"}>Benchmark baseline</ReasonButton>
       <ReasonButton reason={unavailable ?? (baseline.length !== 3 ? `Complete all three baseline trials first (${baseline.length}/3 completed).` : null)} onclick={() => pending = "after"}>Benchmark comparison</ReasonButton>
-      {#if running}<button onclick={() => { cancelled = true; progress = "Stopping after the current trial…"; }}>Stop benchmark</button>{/if}</div>
+      {#if running && !automatic}<button onclick={cancel}>Stop benchmark</button>{/if}</div>
   </div>
   <HelpDetails label="How the benchmark works">
     <p>Three launches per run, with Home between trials and a three-second settling period before RAM measurements. Resume mode pre-opens the app; Android reports the actual launch state when available. Cold mode force-stops only the chosen app. Keep the same content, app settings, and temperature for both runs.</p>
     <p>Comparison reuses the baseline app and mode. Firmware, app version, Android user, hardware identity, and reported launch state must match. Results show Activity Manager TotalTime, not time to a decoded video frame or fully loaded content. Three trials are a quick check; overlapping ranges are inconclusive.</p>
-    <p>Stop takes effect after the current trial. The TV stays on the last launched app. Nothing is installed, cleared, or disabled by this benchmark.</p>
+    <p>Automatic optimization measures the selected app before and after its background restriction and returns to Home after each trial. Manual runs leave the TV on the last launched app. Stop takes effect after the current step; an applied restriction stays applied until you use Undo.</p>
   </HelpDetails>
   {#if pending}
     <div class="benchmark-confirm" role="region" aria-label="Confirm benchmark">
@@ -79,9 +103,10 @@
       <div class="benchmark-actions"><ReasonButton reason={unavailable} onclick={run}>Start three trials</ReasonButton><button onclick={() => pending = null}>Cancel benchmark</button></div>
     </div>
   {/if}
-  {#if progress}<p role="status">{progress}</p>{/if}
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if progress && (!running || !automatic)}<p role="status">{progress}</p>{/if}
+  {#if error && !automatic}<p class="error" role="alert">{error}</p>{/if}
   {#if baseline.length || after.length}
+    {#if baseline.length && baseline.every((trial) => trial.app_pss_mb === null)}<p class="muted">The TV did not report verified RAM usage for this app. No app-memory delta can be calculated.</p>{/if}
     <p class="muted">{baseline[0]?.package ?? after[0]?.package} · Android reports {baseline[0]?.timing.launch_state ?? "unknown launch state"}</p>
     <div class="benchmark-table"><table>
       <thead><tr><th>Metric</th><th>Baseline ({baseline.length}/3)</th><th>Comparison ({after.length}/3)</th><th>Delta</th></tr></thead>
@@ -95,11 +120,15 @@
     {#if baseline.length === 3 && after.length === 3}<p>{!matches ? "Runs do not match. Check the app version, firmware, user, mode, and reported launch state; record a new baseline." : overlap ? "Launch-time ranges overlap. No clear speed improvement demonstrated." : "Observed delta only. Repeat the same workload to check whether the change persists."}</p>{/if}
   {/if}
 </div>
+{/if}
 
 <style>
   h3 { margin-top: 0; }
-  .benchmark-controls, .benchmark-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .benchmark-controls { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }
+  .benchmark-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .benchmark-controls > .benchmark-actions { display: contents; }
   .benchmark-controls > label { display: grid; gap: 0.4rem; }
+  .benchmark-controls :global(select), .benchmark-controls :global(button) { box-sizing: border-box; min-height: 2.75rem; padding: 0.5rem 0.75rem; line-height: 1.5; font-size: 1rem; margin: 0; }
   select { max-width: 100%; }
   .benchmark-table { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }

@@ -115,7 +115,7 @@ export const api = {
   ramReport: (serial: string, hardwareId: string) => invoke<import("./types").RamReport>("ram_report", { serial, hardwareId }),
   ramRestrict: (serial: string, hardwareId: string, user: number, packageName: string, keptPackages: string[]) => invoke<string>("ram_restrict", { serial, hardwareId, user, package: packageName, keptPackages }),
   ramUndo: (serial: string, hardwareId: string, user: number, packageName: string) => invoke<string>("ram_undo", { serial, hardwareId, user, package: packageName }),
-  ramBenchmarkTrial: (serial: string, hardwareId: string, user: number, packageName: string, cold: boolean) => invoke<import("./types").RamBenchmarkTrial>("ram_benchmark_trial", { serial, hardwareId, user, package: packageName, cold }),
+  ramBenchmarkTrial: (serial: string, hardwareId: string, user: number, packageName: string, cold: boolean, returnHome = false) => invoke<import("./types").RamBenchmarkTrial>("ram_benchmark_trial", { serial, hardwareId, user, package: packageName, cold, returnHome }),
   telemetrySettings: () => invoke<TelemetrySettings>("telemetry_settings"),
   setTelemetryEnabled: (enabled: boolean) =>
     invoke<TelemetrySettings>("set_telemetry_enabled", { enabled }),
