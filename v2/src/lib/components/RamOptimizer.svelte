@@ -7,6 +7,7 @@
   import HelpDetails from "./HelpDetails.svelte";
   import Icon from "./Icon.svelte";
   import RamBenchmark from "./RamBenchmark.svelte";
+  import ReasonButton from "./ReasonButton.svelte";
 
   let { serial, hardwareId, active }: { serial: string; hardwareId: string | null; active: boolean } = $props();
   let report = $state<RamReport | null>(null);
@@ -32,6 +33,10 @@
     (showAll || a.pss_mb !== null || a.can_undo || !a.blocked_reason) &&
     `${a.name} ${a.package}`.toLowerCase().includes(query.toLowerCase())));
   const mb = (n: number | null | undefined) => n == null ? "Unavailable" : `${Math.round(n)} MB`;
+  const unavailable = $derived(!hardwareId ? "A verified hardware ID is required. Reconnect the TV and refresh its details."
+    : busy ? "Wait for the current RAM operation to finish."
+    : recording ? "Stop RAM recording before starting another action." : null);
+  const actionReason = $derived(unavailable ?? (benchmarking ? "Wait for the benchmark to finish, or stop it first." : null));
 
   function stop() { recording = null; clearTimeout(timer); }
   $effect(() => {
@@ -112,7 +117,7 @@
   <div class="card">
     <div class="ram-heading">
       <div><h2><Icon name="memory" size={20} /> Reduce background RAM</h2><p class="muted">{recording ? `Recording ${recording === "baseline" ? "baseline" : "comparison"} · ${(recording === "baseline" ? baseline : after).length}/12 samples` : "Observe, restrict selected apps, then compare."}</p></div>
-      <button disabled={busy || benchmarking || !!recording || !hardwareId} onclick={() => refresh()}>Refresh RAM</button>
+      <ReasonButton reason={actionReason} onclick={() => refresh()}>Refresh RAM</ReasonButton>
     </div>
     {#if !hardwareId}<p class="error" role="alert">A verified hardware ID is required.</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -130,8 +135,8 @@
       {#each report?.notes ?? [] as note}<p>{note}</p>{/each}
     </HelpDetails>
     <div class="ram-actions">
-      <button disabled={busy || benchmarking || !!recording || !report} onclick={() => start("baseline")}>Record baseline</button>
-      <button disabled={busy || benchmarking || !!recording || baseline.length < 3} onclick={() => start("after")}>Record comparison</button>
+      <ReasonButton reason={actionReason ?? (!report ? "Refresh RAM successfully before recording a baseline." : null)} onclick={() => start("baseline")}>Record baseline</ReasonButton>
+      <ReasonButton reason={actionReason ?? (baseline.length < 3 ? `Record at least three baseline samples first (${baseline.length}/3 collected).` : null)} onclick={() => start("after")}>Record comparison</ReasonButton>
       {#if recording}<button onclick={stop}>Stop recording</button>{/if}
     </div>
     {#if baseline.length || after.length}
@@ -146,14 +151,14 @@
     {/if}
   </div>
 
-  <RamBenchmark {serial} {hardwareId} {report} {active} disabled={busy || !!recording} bind:running={benchmarking} />
+  <RamBenchmark {serial} {hardwareId} {report} {active} disabledReason={unavailable} bind:running={benchmarking} />
 
   {#if confirmApp}
     <div class="card ram-confirm" role="region" aria-label="Confirm background restriction">
       <h3>Restrict {confirmApp.name}?</h3>
       <p>Background downloads, sync, notifications, and playback may stop. You can still open the app. This does not impose a RAM limit or immediately remove cached memory.</p>
       <p>The previous setting will be saved on this computer for Undo.</p>
-      <div class="ram-actions"><button disabled={busy || benchmarking} onclick={() => confirmApp && change(confirmApp)}>Confirm restriction</button><button disabled={busy} onclick={() => confirmApp = null}>Cancel</button></div>
+      <div class="ram-actions"><ReasonButton reason={actionReason} onclick={() => confirmApp && change(confirmApp)}>Confirm restriction</ReasonButton><ReasonButton reason={busy ? "Wait for the current RAM operation to finish." : null} onclick={() => confirmApp = null}>Cancel</ReasonButton></div>
     </div>
   {/if}
 
@@ -171,8 +176,8 @@
         <tr><td><strong>{app.name}</strong><div class="muted package">{app.package}</div><div class="muted">{kept.has(app.package) ? "Marked Keep" : app.blocked_reason ?? "Eligible for review"}</div></td>
           <td>{mb(app.pss_mb)}<div class="muted">{mb(stats.median)} / {mb(stats.peak)} · {stats.count} readings</div></td>
           <td><div class="ram-row-actions"><label><input type="checkbox" aria-label={`Keep ${app.name}`} checked={kept.has(app.package)} disabled={busy} onchange={(event) => keep(app, event.currentTarget.checked)} /> Keep</label>
-            {#if app.can_undo}<button disabled={busy || benchmarking || !!recording} onclick={() => change(app, true)} aria-label={`Undo restriction for ${app.name}`}>Undo restriction</button>
-            {:else}<button disabled={busy || benchmarking || !!recording || !!app.blocked_reason || kept.has(app.package)} onclick={() => confirmApp = app} aria-label={`Restrict ${app.name}`}>Restrict background</button>{/if}
+            {#if app.can_undo}<ReasonButton reason={actionReason} onclick={() => change(app, true)} label={`Undo restriction for ${app.name}`}>Undo restriction</ReasonButton>
+            {:else}<ReasonButton reason={actionReason ?? (kept.has(app.package) ? "This app is marked Keep. Uncheck Keep before restricting it." : app.blocked_reason)} onclick={() => confirmApp = app} label={`Restrict ${app.name}`}>Restrict background</ReasonButton>{/if}
           </div></td></tr>
       {:else}<tr><td colspan="3">{busy ? "Reading RAM…" : "No matching apps with verified readings."}</td></tr>{/each}</tbody>
     </table></div>
@@ -180,7 +185,7 @@
 </div>
 
 <style>
-  .ram-stack { display: grid; gap: 1rem; }
+  .ram-stack { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 1rem; }
   .ram-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
   .ram-heading h2, .ram-heading h3 { margin: 0; }
   .ram-heading p { margin-bottom: 0; }

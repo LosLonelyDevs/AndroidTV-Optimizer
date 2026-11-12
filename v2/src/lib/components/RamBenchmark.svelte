@@ -4,9 +4,10 @@
   import type { RamBenchmarkTrial, RamReport } from "$lib/types";
   import { benchmarkComparable, benchmarkSummary } from "$lib/ram-session";
   import HelpDetails from "./HelpDetails.svelte";
+  import ReasonButton from "./ReasonButton.svelte";
 
-  let { serial, hardwareId, report, disabled, active, running = $bindable(false) }: {
-    serial: string; hardwareId: string | null; report: RamReport | null; disabled: boolean; active: boolean; running?: boolean;
+  let { serial, hardwareId, report, disabledReason, active, running = $bindable(false) }: {
+    serial: string; hardwareId: string | null; report: RamReport | null; disabledReason: string | null; active: boolean; running?: boolean;
   } = $props();
   let packageName = $state("");
   let cold = $state(false);
@@ -18,6 +19,11 @@
   let cancelled = false;
   let generation = 0;
   const candidates = $derived((report?.apps ?? []).filter((a) => !a.blocked_reason || a.blocked_reason === "Foreground app"));
+  const unavailable = $derived(disabledReason ?? (running ? "Wait for the current benchmark to finish, or stop it first."
+    : !hardwareId ? "A verified hardware ID is required. Reconnect the TV and refresh its details."
+    : !report ? "Refresh RAM successfully before benchmarking." : null));
+  const baselineReason = $derived(unavailable ?? (!candidates.length ? "No eligible reviewed apps are available. Check the Resident apps list for each app's restriction reason."
+    : !candidates.some((app) => app.package === packageName) ? "Choose an eligible app from the App menu first." : null));
   const before = $derived(benchmarkSummary(baseline));
   const result = $derived(benchmarkSummary(after));
   const matches = $derived(benchmarkComparable(baseline, after));
@@ -29,7 +35,7 @@
   onDestroy(() => { cancelled = true; generation++; });
 
   async function run() {
-    if (!pending || !hardwareId || !report || running) return;
+    if (!pending || !hardwareId || !report || unavailable) return;
     const phase = pending;
     const selected = phase === "after" ? baseline[0]?.package : packageName;
     const mode = phase === "after" ? baseline[0]?.cold : cold;
@@ -53,12 +59,12 @@
 <div class="card benchmark">
   <h3>Before / after benchmark</h3>
   <div class="benchmark-controls">
-    <label>App<select aria-label="Benchmark app" bind:value={packageName} disabled={disabled || running}>
+    <label>App<select aria-label="Benchmark app" bind:value={packageName} disabled={!!unavailable}>
       <option value="">Choose a reviewed app</option>{#each candidates as app}<option value={app.package}>{app.name}</option>{/each}
     </select></label>
-    <label>Launch mode<select aria-label="Benchmark launch mode" bind:value={cold} disabled={disabled || running}><option value={false}>Resume (pre-open)</option><option value={true}>Cold (force-stop)</option></select></label>
-    <div class="benchmark-actions"><button disabled={disabled || running || !packageName} onclick={() => pending = "baseline"}>Benchmark baseline</button>
-      <button disabled={disabled || running || baseline.length !== 3} onclick={() => pending = "after"}>Benchmark comparison</button>
+    <label>Launch mode<select aria-label="Benchmark launch mode" bind:value={cold} disabled={!!unavailable}><option value={false}>Resume (pre-open)</option><option value={true}>Cold (force-stop)</option></select></label>
+    <div class="benchmark-actions"><ReasonButton reason={baselineReason} onclick={() => pending = "baseline"}>Benchmark baseline</ReasonButton>
+      <ReasonButton reason={unavailable ?? (baseline.length !== 3 ? `Complete all three baseline trials first (${baseline.length}/3 completed).` : null)} onclick={() => pending = "after"}>Benchmark comparison</ReasonButton>
       {#if running}<button onclick={() => { cancelled = true; progress = "Stopping after the current trial…"; }}>Stop benchmark</button>{/if}</div>
   </div>
   <HelpDetails label="How the benchmark works">
@@ -70,7 +76,7 @@
     <div class="benchmark-confirm" role="region" aria-label="Confirm benchmark">
       <p>This switches the TV between Home and <strong>{pending === "after" ? baseline[0]?.package : packageName}</strong> three times and interrupts what is on screen.</p>
       {#if pending === "after" ? baseline[0]?.cold : cold}<p><strong>Cold mode force-stops this app before each trial. Its playback, downloads, and unsaved work may stop.</strong></p>{/if}
-      <div class="benchmark-actions"><button disabled={disabled || running} onclick={run}>Start three trials</button><button onclick={() => pending = null}>Cancel benchmark</button></div>
+      <div class="benchmark-actions"><ReasonButton reason={unavailable} onclick={run}>Start three trials</ReasonButton><button onclick={() => pending = null}>Cancel benchmark</button></div>
     </div>
   {/if}
   {#if progress}<p role="status">{progress}</p>{/if}

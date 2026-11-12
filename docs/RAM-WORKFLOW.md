@@ -3,6 +3,9 @@
 Open a connected TV's **RAM** tab. This desktop feature is included in the fork's
 2.6.0 source. No physical Shield RAM or speed improvement has yet been verified.
 
+Unavailable action buttons explain why on hover, keyboard focus, or tap. Press
+Escape to dismiss the explanation. Opening it does not perform the blocked action.
+
 ## Measure, change, compare
 
 1. **Record baseline** while repeating the playback/app-switching workload that
