@@ -1,4 +1,5 @@
 import { SHIELD, shieldScenario } from "../lib/worlds.mjs";
+import { fileURLToPath } from "node:url";
 
 const APP = "com.netflix.ninja";
 async function prepare(ctx) {
@@ -14,6 +15,59 @@ async function prepare(ctx) {
 }
 
 export const scenarios = [
+  {
+    name: "ram-disabled-action-reasons",
+    async run(ctx) {
+      await prepare(ctx);
+      const page = ctx.page;
+      const baseline = page.getByRole("button", { name: "Benchmark baseline", exact: true });
+      const comparison = page.getByRole("button", { name: "Benchmark comparison", exact: true });
+      const reason = page.getByRole("tooltip", { name: "Choose an eligible app from the App menu first.", exact: true });
+      ctx.assert.equal(await baseline.isDisabled(), true);
+      await baseline.hover();
+      await reason.waitFor();
+      await page.mouse.move(0, 0);
+      await baseline.focus();
+      await reason.waitFor();
+      await baseline.press("Escape");
+      await reason.waitFor({ state: "hidden" });
+      await baseline.press("Enter");
+      await reason.waitFor();
+      ctx.assert.equal(await page.getByRole("region", { name: "Confirm benchmark", exact: true }).count(), 0);
+      await comparison.click({ force: true });
+      await page.getByRole("tooltip", { name: "Complete all three baseline trials first (0/3 completed).", exact: true }).waitFor();
+      ctx.assert.equal(await page.getByRole("region", { name: "Confirm benchmark", exact: true }).count(), 0);
+      await ctx.step("unavailable benchmark explains the prerequisite");
+      await page.getByRole("checkbox", { name: "Keep Netflix", exact: true }).check();
+      const restrict = page.getByRole("button", { name: "Restrict Netflix", exact: true });
+      await restrict.click({ force: true });
+      await page.getByRole("tooltip", { name: "This app is marked Keep. Uncheck Keep before restricting it.", exact: true }).waitFor();
+      ctx.assert.equal(await page.getByRole("region", { name: "Confirm background restriction", exact: true }).count(), 0);
+      ctx.assert.equal((await ctx.log()).some((call) => /appops set|am force-stop|am start /.test(call.args.join(" "))), false);
+      await ctx.step("kept app remains protected with an accessible reason");
+      for (const theme of ["dark", "light"]) {
+        for (const [width, fontSize] of [[1280, "16px"], [720, "16px"], [720, "32px"]]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.evaluate(({ theme, fontSize }) => {
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.style.fontSize = fontSize;
+          }, { theme, fontSize });
+          await page.getByLabel("Search RAM apps", { exact: true }).focus();
+          await restrict.focus();
+          const tooltip = page.getByRole("tooltip", { name: "This app is marked Keep. Uncheck Keep before restricting it.", exact: true });
+          await tooltip.waitFor();
+          await ctx.waitFor(async () => {
+            const box = await tooltip.boundingBox();
+            return box && box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= 900;
+          });
+          ctx.assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+          await page.screenshot({ path: fileURLToPath(new URL(`../artifacts/ram-disabled-action-reasons/viewport-${theme}-${width}-${fontSize}.png`, import.meta.url)) });
+          await ctx.step(`restriction reason ${theme} ${width} ${fontSize}`);
+        }
+      }
+      await page.getByRole("checkbox", { name: "Keep Netflix", exact: true }).uncheck();
+    },
+  },
   {
     name: "ram-benchmark-stop-and-unsupported",
     async run(ctx) {
