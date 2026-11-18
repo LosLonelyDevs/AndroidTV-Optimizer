@@ -283,9 +283,20 @@ fn has_display_override(output: &str) -> bool {
 
 /// Whether the TV now reports `preset`. Android drops an override equal to
 /// the physical value, so a matching physical value with no override counts.
-fn display_scaling_applied(preset: DisplayScalePreset, now: &CurrentDisplayScaling) -> bool {
+fn display_scaling_applied(
+    preset: DisplayScalePreset,
+    device_type: DeviceType,
+    now: &CurrentDisplayScaling,
+) -> bool {
     let (size, density) = match preset {
-        DisplayScalePreset::Uhd4k => ("3839x2160", "640"),
+        DisplayScalePreset::Uhd4k => (
+            if device_type == DeviceType::Shield {
+                "3839x2160"
+            } else {
+                "3840x2160"
+            },
+            "640",
+        ),
         DisplayScalePreset::Fhd1080p => ("1920x1080", "320"),
         DisplayScalePreset::Hd720p => ("1280x720", "213"),
         DisplayScalePreset::Reset => {
@@ -379,7 +390,7 @@ pub async fn set_display_scaling(
         .shell(&serial, &cmd)
         .await
         .map_err(|e| format!("wm: {e}"))?;
-    Ok(display_scaling_outcome(adb.as_ref(), &serial, preset, &out).await)
+    Ok(display_scaling_outcome(adb.as_ref(), &serial, preset, device_type, &out).await)
 }
 
 /// Judge a `wm` write by its exit status and failure output, then by what
@@ -388,6 +399,7 @@ async fn display_scaling_outcome(
     adb: &dyn crate::adb::AdbDriver,
     serial: &str,
     preset: DisplayScalePreset,
+    device_type: DeviceType,
     out: &crate::adb::AdbOutput,
 ) -> DisplayScaleResult {
     if !super::verification::succeeded(out) {
@@ -397,7 +409,7 @@ async fn display_scaling_outcome(
         };
     }
     match read_display_scaling(adb, serial).await {
-        Ok(now) if display_scaling_applied(preset, &now) => DisplayScaleResult {
+        Ok(now) if display_scaling_applied(preset, device_type, &now) => DisplayScaleResult {
             ok: true,
             message: format!("{}\n{}", now.size, now.density),
         },
@@ -863,18 +875,18 @@ mod tests {
             ),
         );
         assert!(
-            display_scaling_outcome(&applied, "TV", P::Fhd1080p, &ok_out)
+            display_scaling_outcome(&applied, "TV", P::Fhd1080p, DeviceType::Shield, &ok_out)
                 .await
                 .ok
         );
         // The same report is not a reset, nor a 720p switch.
         assert!(
-            !display_scaling_outcome(&applied, "TV", P::Reset, &ok_out)
+            !display_scaling_outcome(&applied, "TV", P::Reset, DeviceType::Shield, &ok_out)
                 .await
                 .ok
         );
         assert!(
-            !display_scaling_outcome(&applied, "TV", P::Hd720p, &ok_out)
+            !display_scaling_outcome(&applied, "TV", P::Hd720p, DeviceType::Shield, &ok_out)
                 .await
                 .ok
         );
@@ -883,19 +895,19 @@ mod tests {
             &wm("Physical size: 1920x1080", "Physical density: 320"),
         );
         assert!(
-            display_scaling_outcome(&reset, "TV", P::Reset, &ok_out)
+            display_scaling_outcome(&reset, "TV", P::Reset, DeviceType::Shield, &ok_out)
                 .await
                 .ok
         );
         assert!(
-            display_scaling_outcome(&reset, "TV", P::Fhd1080p, &ok_out)
+            display_scaling_outcome(&reset, "TV", P::Fhd1080p, DeviceType::Shield, &ok_out)
                 .await
                 .ok
         );
 
         let unreadable = MockAdb::default().on_shell_err("wm size", "offline");
         assert!(
-            !display_scaling_outcome(&unreadable, "TV", P::Reset, &ok_out)
+            !display_scaling_outcome(&unreadable, "TV", P::Reset, DeviceType::Shield, &ok_out)
                 .await
                 .ok
         );
@@ -904,7 +916,7 @@ mod tests {
             ..ok_out.clone()
         };
         assert!(
-            !display_scaling_outcome(&reset, "TV", P::Reset, &failed)
+            !display_scaling_outcome(&reset, "TV", P::Reset, DeviceType::Shield, &failed)
                 .await
                 .ok
         );
@@ -913,7 +925,7 @@ mod tests {
             ..ok_out
         };
         assert!(
-            !display_scaling_outcome(&reset, "TV", P::Reset, &nonzero)
+            !display_scaling_outcome(&reset, "TV", P::Reset, DeviceType::Shield, &nonzero)
                 .await
                 .ok
         );
@@ -1038,6 +1050,20 @@ mod tests {
         // Unknown devices get the native width too (only Shield is special-cased).
         let unknown = display_scale_commands(DisplayScalePreset::Uhd4k, DeviceType::Unknown);
         assert_eq!(unknown, ["wm size 3840x2160", "wm density 640"]);
+        let native = super::CurrentDisplayScaling {
+            size: "Physical size: 3840x2160".into(),
+            density: "Physical density: 640".into(),
+        };
+        assert!(super::display_scaling_applied(
+            DisplayScalePreset::Uhd4k,
+            DeviceType::GoogleTv,
+            &native
+        ));
+        assert!(!super::display_scaling_applied(
+            DisplayScalePreset::Uhd4k,
+            DeviceType::Shield,
+            &native
+        ));
     }
 
     #[test]

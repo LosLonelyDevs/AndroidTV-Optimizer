@@ -688,7 +688,11 @@ mod tests {
         assert!(!installed.ok);
         assert!(installed.message.contains(refusal));
         assert!(installed.hint.as_deref().unwrap().contains("newer"));
-        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert!(installed.downgrade_blocked);
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(!calls[0].iter().any(|arg| arg == "-d"));
+        assert!(calls[1].iter().any(|arg| arg == "-d"));
     }
 
     #[test]

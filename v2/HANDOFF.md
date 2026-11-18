@@ -1,9 +1,11 @@
 # v2 — current state
 
-## Desktop fork integration, 2026-11-11
+## Desktop fork integration, 2026-11-18
 
-This fork is prepared as **2.6.1**, a patch above the **2.6.0** integration of upstream **2.5.0**,
-rebased onto `9bb838f4`. No release tag is created by this integration.
+This fork is prepared as **2.6.0**, one minor increment above upstream **2.5.0**,
+rebased onto `5d829e0c`. This explicitly requested upstream-relative version is
+lower than the previous fork source version 2.6.1. No release tag or updater
+publication is created by this integration.
 The fork retains its existing product identifier, updater public key and channel,
 and pinned MSI UpgradeCode. Upstream crate names and native ADB remain current.
 
@@ -23,7 +25,7 @@ before recording. Physical-device behavior remains unverified in this integratio
 Native desktop ADB takeover: see [NATIVE-ADB-HANDOFF.md](NATIVE-ADB-HANDOFF.md)
 for PR #268, exact candidate provenance, completed checks and remaining native acceptance.
 
-v2 is a shipping desktop app. This fork's source version is **2.6.1**, prepared
+v2 is a shipping desktop app. This fork's source version is **2.6.0**, prepared
 against upstream **2.5.0**. The imported upstream notes below describe its releases;
 this integration does not publish a fork release.
 

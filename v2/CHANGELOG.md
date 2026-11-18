@@ -22,6 +22,8 @@ this file and shows the newest few sections, dated, from its version button.
 
 ## Unreleased
 
+- Rebase the desktop fork onto upstream `5d829e0c` and retain the fork's RAM controls, installer identity, updater key and channel. Set the source version to 2.6.0 as requested (upstream 2.5.0 plus one minor); this is lower than the prior fork source version 2.6.1 and does not publish an updater manifest.
+
 - Anonymous reports: the report server keeps raw reports for 30 days instead of 90, and its privacy policy and Android's More › Privacy help say so. Per-model totals are kept longer, as before.
 - Desktop and Android: 16 more TVs show **Beta** instead of Not verified, each matched on its exact manufacturer, model and codename from anonymous reports: Google TV Streamer, Chromecast with Google TV (4K), Google W2, three onn. boxes, two Sony BRAVIA models, the SEI Robotics Box R 4K Plus and seven Xiaomi Mi Box and Mi TV models.
 - Desktop and Android: restoring a snapshot never writes or resets a setting snapshots don't track. A snapshot file can be edited or shared, so any other setting it names is skipped, the restore preview says how many (the keys are behind its help), and the result lists them as not restored.

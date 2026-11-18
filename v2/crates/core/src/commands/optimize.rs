@@ -161,15 +161,37 @@ async fn apply_performance_settings_impl(
             failed.push(e);
         }
     }
+    let extra = match profile {
+        PerformanceProfile::Optimized => [
+            ("global", "cached_apps_freezer", Some("enabled")),
+            ("secure", "tap_duration_threshold", Some("0.0")),
+            ("secure", "touch_blocking_period", Some("0.0")),
+        ],
+        PerformanceProfile::Default => [
+            ("global", "cached_apps_freezer", Some("device_default")),
+            ("secure", "tap_duration_threshold", None),
+            ("secure", "touch_blocking_period", None),
+        ],
+    };
+    for (namespace, key, setting) in extra {
+        if let Err(e) =
+            super::verification::put_setting_confirmed(adb, serial, namespace, key, setting).await
+        {
+            failed.push(e);
+        }
+    }
     if failed.is_empty() {
         PerformanceResult {
             ok: true,
-            message: format!("Animations → {value}×"),
+            message: format!("Performance settings confirmed; animations → {value}×"),
         }
     } else {
         PerformanceResult {
             ok: false,
-            message: format!("Animations not set to {value}×: {}", failed.join("; ")),
+            message: format!(
+                "Performance settings not fully confirmed: {}",
+                failed.join("; ")
+            ),
         }
     }
 }
@@ -197,9 +219,12 @@ mod tests {
     #[tokio::test]
     async fn animation_scales_are_confirmed_one_by_one() {
         let all = batched(&[
-            "window_animation_scale=0.5\ntransition_animation_scale=0.5\nanimator_duration_scale=0.5",
+            "window_animation_scale=0.5\ntransition_animation_scale=0.5\nanimator_duration_scale=0.5\ncached_apps_freezer=enabled",
         ]);
-        let mock = MockAdb::default().on_shell("settings list global", &all);
+        let secure = batched(&["tap_duration_threshold=0.0\ntouch_blocking_period=0.0"]);
+        let mock = MockAdb::default()
+            .on_shell("settings list global", &all)
+            .on_shell("settings list secure", &secure);
         let log = mock.shell_log();
         let res = apply_performance_settings_impl(&mock, "TV", PerformanceProfile::Optimized).await;
         assert!(res.ok, "{}", res.message);
@@ -209,11 +234,14 @@ mod tests {
                 .iter()
                 .filter(|c| c.starts_with("settings put global"))
                 .count(),
-            3
+            4
         );
 
         let one_missing = batched(&["window_animation_scale=0.5\ntransition_animation_scale=1"]);
         for mock in [
+            MockAdb::default()
+                .on_shell("settings list global", &all)
+                .on_shell("settings list secure", &batched(&[""])),
             MockAdb::default().on_shell("settings list global", &one_missing),
             MockAdb::default()
                 .on_shell("settings put global animator", "Error: denied")
@@ -225,6 +253,26 @@ mod tests {
             assert!(!res.ok, "{}", res.message);
         }
     }
+    #[tokio::test]
+    async fn restore_confirms_freezer_default_and_removes_touch_overrides() {
+        let global = batched(&[
+            "window_animation_scale=1\ntransition_animation_scale=1\nanimator_duration_scale=1\ncached_apps_freezer=device_default",
+        ]);
+        let mock = MockAdb::default()
+            .on_shell("settings list global", &global)
+            .on_shell("settings list secure", &batched(&[""]));
+        let log = mock.shell_log();
+        let res = apply_performance_settings_impl(&mock, "TV", PerformanceProfile::Default).await;
+        assert!(res.ok, "{}", res.message);
+        let calls = log.lock().unwrap();
+        assert!(calls
+            .iter()
+            .any(|c| c == "settings delete secure tap_duration_threshold"));
+        assert!(calls
+            .iter()
+            .any(|c| c == "settings delete secure touch_blocking_period"));
+    }
+
     use crate::engine::{
         ActionMethod, AppEntry, AppListBundle, DeviceType, OptimizeAction, RiskTier,
     };
