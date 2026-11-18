@@ -20,7 +20,7 @@ Upstream provides the core device discovery, ADB, safety catalog, debloating and
 - **More useful APK management.** Quick install downloads compatible release assets from a curated catalog. The folder manager compares APK versions with installed versions, handles downgrade attempts and includes Shizuku setup. This extends upstream's sideloading and APK inspection.
 - **Recording, mirroring and diagnostics.** Record the TV screen, open a separate scrcpy mirror window, inspect storage and larger files, and review actions in the activity console. Recording currently needs the Google platform-tools engine; some tools require a separate download.
 
-These additions were checked against upstream `5d829e0c` on November 18, 2026. See the [fork review](docs/FORK-REVIEW-2026-11-18.md) for source links and validation limits. This update also adds automatic portable Windows ZIP packaging alongside the installers.
+I checked these additions against upstream `d62f4a4d` on November 18, 2026. See the [fork review](docs/FORK-REVIEW-2026-11-18.md) for the code and test results. This update also builds a portable Windows ZIP alongside the installers.
 
 ## Screenshots
 

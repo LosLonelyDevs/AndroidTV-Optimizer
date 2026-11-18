@@ -1,6 +1,6 @@
 # Desktop fork review, November 18, 2026
 
-Compared the desktop fork with upstream `5d829e0c`. The integration preserves published ancestry, the fork's updater public key, application identifier and MSI UpgradeCode. Source version is 2.6.0 as requested, one minor above upstream 2.5.0, even though the previous fork source version was 2.6.1. This work does not tag or publish a release.
+Replayed the fork on upstream `5d829e0c`, then incorporated `d62f4a4d` when it landed during validation. The second update records catalog research on Amazon Music and Photos. The integration preserves published ancestry, the fork's updater public key, application identifier and MSI UpgradeCode. Source version 2.6.0 is one minor above upstream 2.5.0. The previous fork source version was 2.6.1.
 
 ## Fork additions retained
 
