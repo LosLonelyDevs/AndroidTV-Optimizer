@@ -5,7 +5,7 @@
 #
 # What runs:
 #   - ubuntu-22.04 → .deb, .AppImage, .rpm
-#   - macos-latest → universal .dmg / .app.tar.gz (Apple Silicon + Intel)
+#   - macos-26-intel → universal .dmg / .app.tar.gz (Apple Silicon + Intel)
 #   - windows-latest → .msi + setup .exe + portable .zip and SHA256
 # All artifacts land on a GitHub Release for the tag.
 #
@@ -186,7 +186,7 @@ jobs:
           - os: ubuntu-22.04
             label: Linux
             args: ''
-          - os: macos-latest
+          - os: macos-26-intel
             label: macOS (universal)
             args: '--target universal-apple-darwin'
           - os: windows-latest
@@ -216,7 +216,7 @@ jobs:
           toolchain: stable
           # Both arches needed for the universal macOS target. No-op on the
           # Linux/Windows runners — rustup just notes the target is supported.
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       # No cargo cache: release.sh rewrites Cargo.lock on every release, so a
       # lockfile-keyed cache never hit and only stored a multi-GB entry that
@@ -285,7 +285,7 @@ jobs:
       # manifest, which both need this job, so no installed copy updates to a
       # build signed any other way. See the header.
       - name: Verify macOS signing identifier
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         working-directory: v2
         run: |
           set -euo pipefail

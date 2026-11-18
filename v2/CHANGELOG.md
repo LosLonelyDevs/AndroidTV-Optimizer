@@ -20,12 +20,15 @@ this file and shows the newest few sections, dated, from its version button.
 
 ---
 
-## Unreleased
+## v2-2.6.0 - 2026-11-18
 
-- Add Windows portable ZIPs and SHA-256 checksums to automatic and manual desktop releases. Portable copies use the Windows profile for data and download ZIP updates without launching an installer.
-- Use Android TV Optimizer consistently in desktop branding, installer labels and fork release links while retaining upgrade identifiers. Add the original vector/1024px logo and current demo screenshots to the README, with a reviewed list of fork additions.
+- On Windows, choose the installer or extract the portable ZIP and run `atv-optimizer.exe`. The ZIP comes with a SHA-256 checksum and requires Microsoft Edge WebView2. Settings and pairing keys stay in your Windows profile.
+- Android TV Optimizer is now the name on the installer and throughout the desktop app. It supports Android TV and Google TV, including NVIDIA Shield. The README shows supported workflows with demo screenshots.
+- Refresh RAM on demand, stop a measurement, and compare three launch trials before and after restricting background activity. Undo restores the saved restriction.
+- Browse installed apps in one table, manage APK versions, and find display, audio and input controls under device settings. The release also includes recording, mirroring, storage inspection and an activity console.
+- Updated to upstream `d62f4a4d` with device-specific support tiers, snapshot safeguards, and read-back checks for device settings. Existing fork installs keep their updater channel. Development copies already at 2.6.1 will skip this release.
 
-- Rebase the desktop fork onto upstream `5d829e0c` and retain the fork's RAM controls, installer identity, updater key and channel. Set the source version to 2.6.0 as requested (upstream 2.5.0 plus one minor); this is lower than the prior fork source version 2.6.1 and does not publish an updater manifest.
+## Additional upstream development notes
 
 - Anonymous reports: the report server keeps raw reports for 30 days instead of 90, and its privacy policy and Android's More › Privacy help say so. Per-model totals are kept longer, as before.
 - Desktop and Android: 16 more TVs show **Beta** instead of Not verified, each matched on its exact manufacturer, model and codename from anonymous reports: Google TV Streamer, Chromecast with Google TV (4K), Google W2, three onn. boxes, two Sony BRAVIA models, the SEI Robotics Box R 4K Plus and seven Xiaomi Mi Box and Mi TV models.
@@ -50,7 +53,7 @@ this file and shows the newest few sections, dated, from its version button.
 - Android: Send Text keeps what you typed when the app silently reconnects to the same TV; it still closes when a different TV answers. A Reboot or Emergency recovery confirmed across a reconnect asks you to confirm again, and a reboot's result is shown even when the TV drops the connection as it goes down.
 - Opening RAM now stays idle until Refresh RAM is clicked. Active reads show progress and a Stop RAM refresh button that cancels the backend read; leaving the tab also cancels it. Stalled reads time out and release controls for retry.
 
-## v2-2.6.1 - 2026-11-11
+## Development notes for 2.6.1 - 2026-11-11
 
 - RAM restrictions now automatically record three baseline launch trials, apply and verify the setting, then record three comparison trials. A stopped or failed baseline makes no restriction change; partial comparisons keep Undo available.
 - Benchmark results appear after the first baseline reading. App, launch mode, and benchmark buttons share aligned heights and a row where space permits.
@@ -58,7 +61,7 @@ this file and shows the newest few sections, dated, from its version button.
 - Removed the redundant Popularly requested sideloads list while retaining the install controls.
 - Added accessible reasons for unavailable RAM actions and fixed narrow-screen table overflow.
 
-## v2-2.6.0 - 2026-11-11
+## Development notes for 2.6.0 - 2026-11-11
 
 - Rebase the desktop fork onto upstream `9bb838f4`, including native ADB, snapshot schema 4, verified restore outcomes, and the expanded safety catalog.
 - Keep grouped device settings, the unified all-apps table with risk overrides, quick install and Shizuku, recording, storage exploration, saved addresses, and the activity console. App List also offers upstream's Catalog review view.
