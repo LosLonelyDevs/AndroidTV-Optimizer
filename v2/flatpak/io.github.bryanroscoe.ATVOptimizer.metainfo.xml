@@ -61,6 +61,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="2.6.2" date="2026-11-18">
+      <url type="details">https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases/tag/v2-2.6.2</url>
+    </release>
     <release version="2.6.0" date="2026-11-18">
       <url type="details">https://github.com/LosLonelyDevs/AndroidTV-Optimizer/blob/main/v2/CHANGELOG.md</url>
     </release>

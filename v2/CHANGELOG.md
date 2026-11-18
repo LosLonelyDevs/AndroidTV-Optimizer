@@ -20,6 +20,10 @@ this file and shows the newest few sections, dated, from its version button.
 
 ---
 
+## v2-2.6.2 - 2026-11-18
+
+- This release carries the 2.6.0 features forward with a version number above the 2.6.1 development build. Windows users can extract the portable ZIP and run `atv-optimizer.exe` directly.
+
 ## v2-2.6.0 - 2026-11-18
 
 - On Windows, choose the installer or extract the portable ZIP and run `atv-optimizer.exe`. The ZIP comes with a SHA-256 checksum and requires Microsoft Edge WebView2. Settings and pairing keys stay in your Windows profile.
