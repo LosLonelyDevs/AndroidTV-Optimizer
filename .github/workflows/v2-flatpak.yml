@@ -15,6 +15,11 @@ on:
       - 'v2/src-tauri/tauri.conf.json'
       - '.github/workflows/v2-flatpak.yml'
   workflow_dispatch:
+    inputs:
+      upload-tag:
+        description: Existing v2 release tag to build and attach the Flatpak to (leave empty for a test build)
+        required: false
+        type: string
   workflow_call:
     inputs:
       upload-tag:
@@ -106,12 +111,31 @@ jobs:
           name: flatpak-generated-sources
           path: v2/flatpak/generated-sources
 
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8 (v6 on 2026-11-11)
+      - name: Install missing SDK extensions
+        run: |
+          set -eu
+          # The image already carries GNOME 50. Updating its lower-layer SDK
+          # inside Docker fails when OSTree tries to rename that deployment.
+          for ref in org.gnome.Platform//50 org.gnome.Sdk//50 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08 org.freedesktop.Sdk.Extension.node22//25.08; do
+            flatpak info --arch=x86_64 "$ref" >/dev/null 2>&1 ||
+              flatpak install --noninteractive --no-related --arch=x86_64 flathub "$ref"
+          done
+
+      - name: Build release bundle with the installed SDK
+        run: |
+          set -eu
+          flatpak-builder --disable-rofiles-fuse --force-clean --arch=x86_64 \
+            --default-branch=master --repo=repo flatpak_app v2/flatpak/io.github.bryanroscoe.ATVOptimizer.yml
+          flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            repo atv-optimizer.flatpak io.github.bryanroscoe.ATVOptimizer master
+
+      - uses: actions/upload-artifact@v4
         with:
-          manifest-path: v2/flatpak/io.github.bryanroscoe.ATVOptimizer.yml
-          bundle: atv-optimizer.flatpak
-          artifact-name: atv-optimizer-flatpak
-          cache-key: flatpak-builder-${{ hashFiles('v2/Cargo.lock', 'v2/package-lock.json', 'v2/flatpak/*.yml') }}
+          name: atv-optimizer-flatpak
+          path: atv-optimizer.flatpak
+          if-no-files-found: error
+          retention-days: 7
 
   upload:
     needs: build
