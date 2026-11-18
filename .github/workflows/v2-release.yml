@@ -70,6 +70,10 @@ on:
       tag:
         description: 'Existing v2-* tag to rebuild and republish (its commit is built; the run fails if the tag does not exist)'
         required: true
+      gallery_only:
+        description: Refresh the README screenshots for an existing release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -177,6 +181,7 @@ jobs:
 
   build:
     needs: notes
+    if: github.event_name != 'workflow_dispatch' || !inputs.gallery_only
     name: Build on ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -626,8 +631,11 @@ jobs:
   refresh-screenshots:
     needs: [notes, build]
     name: Regenerate gallery GIF
-    runs-on: ubuntu-latest
-    if: success()
+    runs-on: ubuntu-24.04
+    if: >-
+      !cancelled() && needs.notes.result == 'success' &&
+      (needs.build.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && inputs.gallery_only && needs.build.result == 'skipped'))
     steps:
       - name: Checkout default branch
         uses: actions/checkout@v5
