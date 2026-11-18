@@ -76,7 +76,7 @@ async function exercise({ browser, base }) {
     () => !document.querySelector("textarea")?.value.includes("Collecting…"),
   );
   const hostOnly = await bundle.inputValue();
-  assert.match(hostOnly, /ATV Optimizer diagnostics/, hostOnly);
+  assert.match(hostOnly, /Android TV Optimizer diagnostics/, hostOnly);
   assert.match(hostOnly, /No device selected/, hostOnly);
 
   // The report leaves the machine only if the user opens the issue, and the
@@ -114,7 +114,7 @@ async function exercise({ browser, base }) {
   const opened = await page.evaluate(() => window.__OPENED__);
   assert.equal(opened.length, 1, JSON.stringify(opened));
   const url = new URL(opened[0]);
-  assert.equal(`${url.origin}${url.pathname}`, "https://github.com/bryanroscoe/shield_optimizer/issues/new");
+  assert.equal(`${url.origin}${url.pathname}`, "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues/new");
   assert.equal(url.searchParams.get("template"), "bug_report.yml");
   assert.equal(url.searchParams.get("diagnostics"), shown, "the form carries the bundle verbatim");
   assert.ok(opened[0].length <= 6000, `prefilled URL stays under the limit (${opened[0].length})`);

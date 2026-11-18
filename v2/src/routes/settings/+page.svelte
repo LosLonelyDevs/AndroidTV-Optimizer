@@ -26,7 +26,7 @@
   } from "../../../shared/telemetry";
 
   const shell = useAppShell();
-  const RELEASES_PAGE = "https://github.com/bryanroscoe/shield_optimizer/releases";
+  const RELEASES_PAGE = "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases";
 
   const telemetry = $derived(reports.settings);
   const supportId = $derived(formatSupportId(telemetry?.support_id));
@@ -408,7 +408,7 @@
 
   <section class="card" id="updates" aria-labelledby="updates-title">
     <h2 id="updates-title"><Icon name="download" size={18} /> Updates</h2>
-    {#if !shell.updatesViaFlatpak}
+    {#if !shell.updatesViaFlatpak && !shell.portable}
     <div class="row">
       <div class="row-text">
         <HelpTip label="Auto-update" forId="auto-update">
@@ -442,6 +442,8 @@
             {shell.updateProgress}
           {:else if shell.pendingVersion}
             {shell.updateProgress ? `${shell.updateProgress} ` : ""}v{shell.pendingVersion} is available.
+          {:else if shell.portable}
+            {shell.checkMessage || "Portable edition. Download and extract a new ZIP from All releases to update."}
           {:else if shell.rollingOutVersion && !shell.updatesViaFlatpak}
             v{shell.rollingOutVersion} is rolling out. The in-app updater will offer it within a few
             minutes.
@@ -697,7 +699,7 @@
     <div class="row">
       <div class="row-text">
         <span class="row-label">
-          ATV Optimizer <span class="mono">{shell.currentVersion ? `v${shell.currentVersion}` : ""}</span>
+          Android TV Optimizer <span class="mono">{shell.currentVersion ? `v${shell.currentVersion}` : ""}</span>
         </span>
       </div>
       <div class="row-control">

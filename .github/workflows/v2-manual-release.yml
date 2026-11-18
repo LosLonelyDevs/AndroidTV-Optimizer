@@ -99,11 +99,29 @@ jobs:
         with:
           projectPath: v2
           tagName: ${{ steps.release.outputs.tag }}
-          releaseName: 'Shield Optimizer ${{ steps.release.outputs.tag }}'
+          releaseName: 'Android TV Optimizer ${{ steps.release.outputs.tag }}'
           releaseDraft: false
           prerelease: ${{ steps.release.outputs.prerelease }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+      - name: Package Windows portable ZIP
+        if: matrix.os == 'windows-latest'
+        id: portable
+        shell: pwsh
+        run: ./v2/scripts/package-portable.ps1
+
+      - name: Publish Windows portable ZIP
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          ARCHIVE: ${{ steps.portable.outputs.archive }}
+          CHECKSUM: ${{ steps.portable.outputs.checksum }}
+        run: |
+          gh release upload "$env:TAG" "$env:ARCHIVE" "$env:CHECKSUM" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Portable release upload failed' }
 
   # Same as merge-updater in v2-release.yml: commit the merged latest.json that
   # tauri-action uploaded to the release, so the raw.githubusercontent endpoint

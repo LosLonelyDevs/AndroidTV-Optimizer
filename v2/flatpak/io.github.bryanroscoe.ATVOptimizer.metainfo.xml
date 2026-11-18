@@ -3,7 +3,7 @@
   <id>io.github.bryanroscoe.ATVOptimizer</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>LicenseRef-proprietary=https://github.com/bryanroscoe/shield_optimizer/blob/main/LICENSE</project_license>
-  <name>ATV Optimizer</name>
+  <name>Android TV Optimizer</name>
   <summary>Debloat and tune Android TV devices</summary>
   <developer id="io.github.bryanroscoe">
     <name>Bryan Roscoe</name>
@@ -15,7 +15,7 @@
     </p>
     <p>
       Works on Nvidia Shield TV, Onn 4K Pro, Chromecast with Google TV, Google TV Streamer and
-      other Android TV devices. ATV Optimizer finds TVs on your network and connects to them with
+      other Android TV devices. Android TV Optimizer finds TVs on your network and connects to them with
       its own built-in ADB. Google's platform-tools are optional, in Settings, for a TV connected
       by USB.
     </p>
@@ -25,9 +25,9 @@
     </p>
   </description>
   <launchable type="desktop-id">io.github.bryanroscoe.ATVOptimizer.desktop</launchable>
-  <url type="homepage">https://github.com/bryanroscoe/shield_optimizer</url>
-  <url type="bugtracker">https://github.com/bryanroscoe/shield_optimizer/issues</url>
-  <url type="vcs-browser">https://github.com/bryanroscoe/shield_optimizer</url>
+  <url type="homepage">https://github.com/LosLonelyDevs/AndroidTV-Optimizer</url>
+  <url type="bugtracker">https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues</url>
+  <url type="vcs-browser">https://github.com/LosLonelyDevs/AndroidTV-Optimizer</url>
   <content_rating type="oars-1.1">
     <content_attribute id="social-info">mild</content_attribute>
   </content_rating>
@@ -61,7 +61,7 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="2.6.0" date="2026-11-11">
+    <release version="2.6.0" date="2026-11-18">
       <url type="details">https://github.com/LosLonelyDevs/AndroidTV-Optimizer/blob/main/v2/CHANGELOG.md</url>
     </release>
   </releases>

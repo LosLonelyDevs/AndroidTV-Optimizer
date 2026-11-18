@@ -1596,7 +1596,7 @@
   <div class="install-pane">
     <h2>ADB not found on this system</h2>
     <p>
-      ATV Optimizer needs Android's <code>adb</code> binary to talk to your TV.
+      Android TV Optimizer needs Android's <code>adb</code> binary to talk to your TV.
       We can download Google's official platform-tools and install them locally —
       no system-wide changes, just a self-contained copy under your app-data folder.
     </p>
@@ -1928,13 +1928,13 @@
     {#if localNetwork.status && localNetwork.status !== "not_applicable"}
       <p class="local-network-help">
         {#if adbBackend === "direct"}
-          On a Mac, check that ATV Optimizer is on in
+          On a Mac, check that Android TV Optimizer is on in
           <button class="inline-link" onclick={openLocalNetworkSettings}>Privacy &amp; Security</button>
           → Local Network; if it already is, turn it off and on again (all of them, if it's listed
           more than once), then scan again.
         {:else}
           On a Mac, after an update, macOS can cut off an ADB server the earlier version left
-          running, and Restart ADB replaces it. If that doesn't help, check that ATV Optimizer is on
+          running, and Restart ADB replaces it. If that doesn't help, check that Android TV Optimizer is on
           in <button class="inline-link" onclick={openLocalNetworkSettings}>Privacy &amp; Security</button>
           → Local Network; if it already is, turn it off and on again (all of them, if it's listed
           more than once), then Restart ADB.

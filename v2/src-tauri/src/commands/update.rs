@@ -4,11 +4,11 @@
 use serde::Serialize;
 
 const RELEASES_API: &str =
-    "https://api.github.com/repos/bryanroscoe/shield_optimizer/releases?per_page=20";
+    "https://api.github.com/repos/LosLonelyDevs/AndroidTV-Optimizer/releases?per_page=20";
 // Full releases list, not `/releases/latest` — `latest` redirects to the most
 // recent non-prerelease, which is a v1 PowerShell tag (v0.x), so v2 betas never
 // show. The list page surfaces every release including v2 pre-releases.
-const RELEASES_PAGE: &str = "https://github.com/bryanroscoe/shield_optimizer/releases";
+const RELEASES_PAGE: &str = "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases";
 
 #[derive(Serialize)]
 pub struct UpdateInfo {
@@ -54,6 +54,9 @@ pub async fn check_for_update() -> Result<UpdateInfo, String> {
 /// out of the way. `"self"` everywhere else.
 #[tauri::command]
 pub fn update_channel() -> Result<&'static str, String> {
+    if crate::portable::is_portable() {
+        return Ok("portable");
+    }
     Ok(channel_for(
         std::env::var_os("FLATPAK_ID").is_some(),
         std::path::Path::new("/.flatpak-info").exists(),

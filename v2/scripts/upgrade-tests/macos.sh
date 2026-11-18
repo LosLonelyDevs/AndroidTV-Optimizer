@@ -122,8 +122,8 @@ run_app() { # mode(exec|open) bundle-path bundle-id label
 save_state() { # label
   py listing --out "$EVIDENCE/listing-$1.txt" "$old_data" "$new_data" || true
   py listing --max-depth 6 --out "$EVIDENCE/listing-profiles-$1.txt" "$old_profile" "$new_profile" || true
-  py listing --max-depth 2 --out "$EVIDENCE/listing-apps-$1.txt" "/Applications/Shield Optimizer.app" "/Applications/ATV Optimizer.app" "$HOME/Library/WebKit" || true
-  for b in "Shield Optimizer.app" "ATV Optimizer.app"; do
+  py listing --max-depth 2 --out "$EVIDENCE/listing-apps-$1.txt" "/Applications/Shield Optimizer.app" "/Applications/ATV Optimizer.app" "/Applications/Android TV Optimizer.app" "$HOME/Library/WebKit" || true
+  for b in "Shield Optimizer.app" "ATV Optimizer.app" "Android TV Optimizer.app"; do
     plist="/Applications/$b/Contents/Info.plist"
     [[ -f "$plist" ]] && plutil -convert xml1 -o "$EVIDENCE/Info-$1-${b%.app}.plist" "$plist"
   done
@@ -158,13 +158,17 @@ check_migrated() { # label
 
 check_bundle() { # expected-path
   local want="$1" other id version
-  if [[ "$want" == "/Applications/ATV Optimizer.app" ]]; then other="/Applications/Shield Optimizer.app"; else other="/Applications/ATV Optimizer.app"; fi
+  local bundles=("Shield Optimizer.app" "ATV Optimizer.app" "Android TV Optimizer.app")
   local present rc
   present=$(find /Applications -maxdepth 1 -name '*Optimizer*.app' | tr '\n' ' ')
   [[ -d "$want" ]]; rc=$?
   ok_if "bundle is at $want" "$rc" "$present"
-  [[ ! -e "$other" ]]; rc=$?
-  ok_if "no bundle left at $other" "$rc" "$present"
+  for bundle in "${bundles[@]}"; do
+    other="/Applications/$bundle"
+    [[ "$other" == "$want" ]] && continue
+    [[ ! -e "$other" ]]; rc=$?
+    ok_if "no bundle left at $other" "$rc" "$present"
+  done
   if [[ -f "$want/Contents/Info.plist" ]]; then
     id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$want/Contents/Info.plist")
     version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$want/Contents/Info.plist")
@@ -189,7 +193,7 @@ finish() {
 
 group "Preconditions"
 block_telemetry
-for p in "$old_data" "$new_data" "$old_profile" "$new_profile" "/Applications/Shield Optimizer.app" "/Applications/ATV Optimizer.app"; do
+for p in "$old_data" "$new_data" "$old_profile" "$new_profile" "/Applications/Shield Optimizer.app" "/Applications/ATV Optimizer.app" "/Applications/Android TV Optimizer.app"; do
   [[ -e "$p" ]] && fatal "$p exists before the test started"
 done
 for root in /opt/homebrew/Caskroom /usr/local/Caskroom; do
@@ -271,7 +275,7 @@ endgroup
 if [[ "$HOMEBREW" == 1 ]]; then
   final_path="$app_path"
 else
-  final_path="/Applications/ATV Optimizer.app"
+  final_path="/Applications/Android TV Optimizer.app"
 fi
 
 group "First launch of the new build (relaunched like an update restart)"

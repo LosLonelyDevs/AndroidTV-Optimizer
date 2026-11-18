@@ -649,7 +649,7 @@
             class:on={kindFilter.curated}
             aria-pressed={kindFilter.curated}
             onclick={() => (kindFilter.curated = !kindFilter.curated)}
-            title="Apps in Shield Optimizer's curated list for this device — the ones with a recommendation"
+            title="Apps in Android TV Optimizer's curated list for this device — the ones with a recommendation"
           >Curated <span class="chip-count">{kindCounts.curated}</span></button>
           <button
             class="chip"

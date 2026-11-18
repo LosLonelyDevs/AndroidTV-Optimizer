@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Shield Optimizer",
+  "productName": "Android TV Optimizer",
   "version": "2.6.0",
   "identifier": "com.shieldoptimizer.app",
   "build": {
@@ -27,7 +27,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTA5QTI1MEQ0NDkxNkIKUldScmtVUU5KWnFnN0g2RHZuRnYwOG8wTkhKMTJsbVAra2JqbEh5M3dVNlByTjJIUGtvSFdGTkIK",
       "endpoints": [
-        "https://raw.githubusercontent.com/LosLonelyDevs/shield_optimizer/main/v2/updater/latest.json"
+        "https://raw.githubusercontent.com/LosLonelyDevs/AndroidTV-Optimizer/main/v2/updater/latest.json"
       ]
     }
   },
@@ -39,7 +39,7 @@
     "publisher": "shieldoptimizer",
     "copyright": "Bryan Roscoe",
     "shortDescription": "Debloat and tune Android TV devices via ADB.",
-    "longDescription": "ATV Optimizer is a cross-platform tool for debloating and tuning Nvidia Shield TV, Onn 4K Pro, Chromecast with Google TV, and other Android TV devices. v2 is a Rust/Tauri rewrite of the original PowerShell script.",
+    "longDescription": "Android TV Optimizer manages, debloats and tunes Android TV and Google TV devices over ADB, including onn., Chromecast, Sony, Xiaomi and NVIDIA Shield. Available for Windows, macOS and Linux.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

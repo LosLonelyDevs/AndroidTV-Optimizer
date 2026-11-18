@@ -18,7 +18,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const V2 = join(HERE, "..");
 const PORT = 1421;
 const BASE = `http://localhost:${PORT}`;
-const SERIAL = "192.168.1.42:5555";
+const HOST = "192.0.2.42";
+const SERIAL = `${HOST}:5555`;
 const DEVICE_URL = `${BASE}/devices/${encodeURIComponent(SERIAL)}`;
 
 // One output dir per theme. colorScheme drives prefers-color-scheme, which the
@@ -59,7 +60,7 @@ async function captureScreens(page, shot) {
     const pairAddress = page.getByPlaceholder("IP:pair_port — e.g. 192.168.42.71:43219");
     const pairPin = page.getByPlaceholder("6-digit PIN");
     const connectAddress = page.getByPlaceholder("IP[:port] — e.g. 192.168.42.71");
-    await pairAddress.fill("192.168.1.42:43219");
+    await pairAddress.fill(`${HOST}:43219`);
     await pairPin.fill("123456");
     await page.getByRole("button", { name: "Pair", exact: true }).click();
     await page.getByText("Close the pairing dialog on your phone/TV.", { exact: false }).waitFor();
@@ -69,7 +70,7 @@ async function captureScreens(page, shot) {
     // The paired host carries over with a bare trailing colon (#88); the
     // connect port is different from the pairing port, so it is never guessed.
     const carried = await connectAddress.inputValue();
-    if (carried !== "192.168.1.42:") {
+    if (carried !== `${HOST}:`) {
       throw new Error(`pairing should carry only the host into connect, got ${JSON.stringify(carried)}`);
     }
     await shot("pair-device");
@@ -234,7 +235,12 @@ async function main() {
         colorScheme: scheme.name, // drives prefers-color-scheme → app "Auto"
       });
       // The gallery shows what a fresh install runs: the built-in engine.
-      await context.addInitScript(() => localStorage.setItem("shieldopt.demo.adbEngineBuiltin", "1"));
+      await context.addInitScript(() => {
+        localStorage.setItem("shieldopt.demo.adbEngineBuiltin", "1");
+        localStorage.setItem("shieldopt.demo.documentationNetwork", "1");
+      });
+      await context.route("**/*", route =>
+        new URL(route.request().url()).origin === BASE ? route.continue() : route.abort());
       const page = await context.newPage();
 
       let n = 0;
@@ -246,6 +252,11 @@ async function main() {
         // default: the gallery wants a window, not a long strip. It is how you
         // review a screen's whole length without scrolling by hand.
         await page.screenshot({ path: file, fullPage: process.env.SHOT_FULLPAGE === "1" });
+        if (scheme.name === "dark" && ["overview", "all-apps", "ram-results", "device-display"].includes(name)) {
+          const assets = join(V2, "..", "assets", "screenshots");
+          await mkdir(assets, { recursive: true });
+          await page.screenshot({ path: join(assets, `${name}.png`), fullPage: name === "ram-results" });
+        }
         console.log(`  ✓ ${file}`);
       };
 

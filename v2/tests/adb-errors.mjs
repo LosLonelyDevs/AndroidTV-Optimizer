@@ -104,7 +104,7 @@ for (const bad of ["adb-unknown-x", "adb--x", "adb-1321920044953", "adb-ABC-", "
   assert.equal(blocked.localNetwork, "blocked");
   assert.equal(
     blocked.summary,
-    "Couldn't reach 192.168.1.9. macOS is blocking ATV Optimizer from your local network. Turn ATV Optimizer on in System Settings → Privacy & Security → Local Network (off and on again if it already is), then Restart ADB.",
+    "Couldn't reach 192.168.1.9. macOS is blocking Android TV Optimizer from your local network. Turn Android TV Optimizer on in System Settings → Privacy & Security → Local Network (off and on again if it already is), then Restart ADB.",
   );
   assert.ok(blocked.summary.includes(LOCAL_NETWORK_BLOCKED));
 
@@ -120,7 +120,7 @@ for (const bad of ["adb-unknown-x", "adb--x", "adb-1321920044953", "adb-ABC-", "
   assert.equal(unknown.localNetwork, "restart_or_settings");
   assert.equal(
     unknown.summary,
-    "Couldn't reach 192.168.1.9. Try Restart ADB first: after an update, macOS can cut off an ADB server the earlier version left running. If that doesn't help, macOS may be blocking local network access for ATV Optimizer, or a VPN or firewall app may be in the way.",
+    "Couldn't reach 192.168.1.9. Try Restart ADB first: after an update, macOS can cut off an ADB server the earlier version left running. If that doesn't help, macOS may be blocking local network access for Android TV Optimizer, or a VPN or firewall app may be in the way.",
   );
   assert.doesNotMatch(unknown.summary, /macOS is blocking/, "a possibility, never a certainty");
   assert.ok(unknown.summary.indexOf("Restart ADB") < unknown.summary.indexOf("may be blocking"), "restart first");
@@ -152,7 +152,7 @@ for (const bad of ["adb-unknown-x", "adb--x", "adb-1321920044953", "adb-ABC-", "
   const restart =
     "ADB server restarted.\nCould not reconnect after 4 tries: 192.168.1.9:5555: failed to connect to '192.168.1.9:5555': No route to host — check the TV is awake";
   assert.ok(isNoRoute(restart));
-  assert.equal(LOCAL_NETWORK_POSSIBLE, "macOS may be blocking local network access for ATV Optimizer, or a VPN or firewall app may be in the way.");
+  assert.equal(LOCAL_NETWORK_POSSIBLE, "macOS may be blocking local network access for Android TV Optimizer, or a VPN or firewall app may be in the way.");
 }
 
 // Native Rust ADB connects from the app itself and has no adb server, so no
@@ -165,7 +165,7 @@ for (const bad of ["adb-unknown-x", "adb--x", "adb-1321920044953", "adb-ABC-", "
   assert.equal(blocked.localNetwork, "blocked");
   assert.equal(
     blocked.summary,
-    `Couldn't reach 192.168.1.9. ${LOCAL_NETWORK_BLOCKED} Turn ATV Optimizer on in System Settings → Privacy & Security → Local Network (off and on again if it already is), then try again.`,
+    `Couldn't reach 192.168.1.9. ${LOCAL_NETWORK_BLOCKED} Turn Android TV Optimizer on in System Settings → Privacy & Security → Local Network (off and on again if it already is), then try again.`,
   );
 
   // The app itself reached the network: Local Network is not the cause.

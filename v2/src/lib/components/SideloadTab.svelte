@@ -482,14 +482,16 @@
     color: var(--fg-primary);
     font-weight: 500;
   }
-  /* Centred in the pane, but held inside the visible band of the window: a
-     long Discovered APKs list makes the pane taller than the window, and a
-     plain centred label would sit below the fold while dragging. */
+  /* The APK tools below this pane also receive native window drops. */
   .drop-label {
-    position: sticky;
-    top: 35vh;
-    bottom: 35vh;
-    margin-block: auto;
+    position: fixed;
+    top: 45%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-lg);
+    pointer-events: none;
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;

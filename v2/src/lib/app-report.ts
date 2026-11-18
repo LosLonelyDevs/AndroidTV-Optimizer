@@ -168,7 +168,7 @@ export function reportFileName(pkg: string, now: Date): string {
   return `app-report-${pkg}-${now.toISOString().slice(0, 10)}.json`;
 }
 
-const ISSUE_BASE = "https://github.com/bryanroscoe/shield_optimizer/issues/new";
+const ISSUE_BASE = "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues/new";
 /// Same ceiling the bug form uses, well under what GitHub accepts in a URL.
 export const APP_REPORT_PREFILL_LIMIT = 6000;
 

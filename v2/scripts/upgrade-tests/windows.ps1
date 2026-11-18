@@ -86,6 +86,8 @@ function Block-Telemetry {
 
 function Find-Exe([string[]] $Names) {
   foreach ($dir in @(
+      (Join-Path $Local 'Android TV Optimizer'), (Join-Path $env:ProgramFiles 'Android TV Optimizer'),
+      (Join-Path ${env:ProgramFiles(x86)} 'Android TV Optimizer'),
       (Join-Path $Local 'ATV Optimizer'), (Join-Path $Local 'Shield Optimizer'),
       (Join-Path $env:ProgramFiles 'ATV Optimizer'), (Join-Path $env:ProgramFiles 'Shield Optimizer'),
       (Join-Path ${env:ProgramFiles(x86)} 'ATV Optimizer'))) {
@@ -503,11 +505,11 @@ try {
   Step 'Check the install'
   Save-State 'after-upgrade'
   $entries = @(Get-UninstallEntries)
-  $legacyEntries = @($entries | Where-Object { $_.DisplayName -eq 'Shield Optimizer' })
-  $atvEntries = @($entries | Where-Object { $_.DisplayName -eq 'ATV Optimizer' })
+  $legacyEntries = @($entries | Where-Object { $_.DisplayName -in @('Shield Optimizer', 'ATV Optimizer') })
+  $atvEntries = @($entries | Where-Object { $_.DisplayName -eq 'Android TV Optimizer' })
   Record 'no "Shield Optimizer" Add/Remove entry' ($legacyEntries.Count -eq 0) (($legacyEntries | ForEach-Object key) -join ', ')
   $versions = ($atvEntries | ForEach-Object { "$($_.DisplayVersion) at $($_.key)" }) -join '; '
-  Record 'exactly one "ATV Optimizer" Add/Remove entry, at the new version' `
+  Record 'exactly one "Android TV Optimizer" Add/Remove entry, at the new version' `
     ($atvEntries.Count -eq 1 -and $atvEntries[0].DisplayVersion -in @($NewVersion, $NewWixVersion)) $versions
   foreach ($root in @('HKCU', 'HKLM')) {
     $gone = -not (Test-Path "${root}:\Software\shieldoptimizer\Shield Optimizer")
@@ -524,10 +526,10 @@ try {
   $links = @(Get-Shortcuts)
   $legacyLinks = @($links | Where-Object { $_.kind -ne 'pin' -and $_.name -eq 'Shield Optimizer' })
   Record 'no "Shield Optimizer" Start menu or desktop shortcut' ($legacyLinks.Count -eq 0) (($legacyLinks | ForEach-Object path) -join ', ')
-  $start = @($links | Where-Object { $_.kind -eq 'startmenu' -and $_.name -eq 'ATV Optimizer' -and $_.target -like "*\$NewExeName" -and $_.targetExists })
+  $start = @($links | Where-Object { $_.kind -eq 'startmenu' -and $_.name -eq 'Android TV Optimizer' -and $_.target -like "*\$NewExeName" -and $_.targetExists })
   Record "Start menu shortcut opens $NewExeName" ($start.Count -ge 1) (($links | Where-Object kind -eq 'startmenu' | ForEach-Object { "$($_.path) -> $($_.target)" }) -join '; ')
   if ($script:HadDesktop) {
-    $desk = @($links | Where-Object { $_.kind -eq 'desktop' -and $_.name -eq 'ATV Optimizer' -and $_.target -like "*\$NewExeName" -and $_.targetExists })
+    $desk = @($links | Where-Object { $_.kind -eq 'desktop' -and $_.name -eq 'Android TV Optimizer' -and $_.target -like "*\$NewExeName" -and $_.targetExists })
     Record "desktop shortcut opens $NewExeName" ($desk.Count -ge 1) (($links | Where-Object kind -eq 'desktop' | ForEach-Object { "$($_.path) -> $($_.target)" }) -join '; ')
   }
   $stale = @($links | Where-Object { $_.kind -ne 'pin' -and (-not $_.targetExists -or $_.target -like "*\$OldExeName") })

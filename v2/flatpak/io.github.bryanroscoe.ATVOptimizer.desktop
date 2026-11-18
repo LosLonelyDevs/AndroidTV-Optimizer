@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=ATV Optimizer
+Name=Android TV Optimizer
 Comment=Debloat and tune Android TV devices over ADB
 Exec=atv-optimizer
 Icon=io.github.bryanroscoe.ATVOptimizer

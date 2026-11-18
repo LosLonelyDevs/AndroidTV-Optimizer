@@ -12,6 +12,13 @@ Use the MSI installer for an in-place MSI update. Choosing the first option stil
 explicitly permits conversion; passive and existing NSIS paths retain
 the stock behavior.
 
+The visible product name is now Android TV Optimizer. `LEGACY_PRODUCTNAME`
+keeps the existing NSIS uninstall and remembered-install-folder registry keys
+under Shield Optimizer. MSI detection accepts both display names with the pinned
+publisher. Old shortcuts are removed only when they target this installation's
+executable; the new shortcuts use the current name. The MSI UpgradeCode remains
+unchanged. Do not replace those compatibility keys as cosmetic cleanup.
+
 The MSI page does not compare its encoded Windows Installer version with the
 app's semantic version in its displayed copy. Keeping the MSI installation stays
 available even when downgrades are disabled.

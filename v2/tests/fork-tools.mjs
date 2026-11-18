@@ -3,13 +3,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 import { chromium } from "playwright";
+import { freePort } from "./lib/free-port.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const previousDemo = process.env.VITE_DEMO;
 process.env.VITE_DEMO = "1";
 let server, browser;
 try {
-  server = await createServer({ root, server: { host: "127.0.0.1", port: 0, hmr: false } });
+  server = await createServer({ root, server: { host: "127.0.0.1", port: await freePort(), strictPort: true, hmr: false } });
   await server.listen();
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

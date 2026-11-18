@@ -87,7 +87,7 @@ async function main() {
     }, { folder: FOLDER, pkg: PKG });
 
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/devices/${encodeURIComponent(SERIAL)}`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded", timeout: 60000,
     });
     await page.locator("#tab-sideload").click();
     const panel = page.locator("#tabpanel-sideload");

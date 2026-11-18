@@ -1,4 +1,4 @@
-# ATV Optimizer v2 release pipeline.
+# Android TV Optimizer v2 release pipeline.
 #
 # Trigger: push of a `v2-*` tag (matches `v2-0.1.0`, `v2-0.1.0-rc1`, etc.).
 # v1's `v0.x.x` tags do NOT fire this — keep the two release tracks separate.
@@ -6,7 +6,7 @@
 # What runs:
 #   - ubuntu-22.04 → .deb, .AppImage, .rpm
 #   - macos-latest → universal .dmg / .app.tar.gz (Apple Silicon + Intel)
-#   - windows-latest → .msi + .exe
+#   - windows-latest → .msi + setup .exe + portable .zip and SHA256
 # All artifacts land on a GitHub Release for the tag.
 #
 # Pre-releases: a tag with any suffix after X.Y.Z (v2-2.6.0-beta.1) becomes a
@@ -161,11 +161,11 @@ jobs:
           body+=$'\n\n'"### First-run warnings"$'\n\n'
           body+="These builds are unsigned. Your OS may complain on first launch:"$'\n\n'
           body+="- **macOS** (Gatekeeper): the first-launch dialog on macOS 15+ only offers \"Move to Trash\" or \"Done\" — click **Done**, then either:"$'\n'
-          body+="    - **Terminal:** \`xattr -dr com.apple.quarantine \"/Applications/ATV Optimizer.app\"\` (one-time, then double-click as normal)"$'\n'
-          body+="    - **GUI:** System Settings → Privacy & Security → scroll to the \"ATV Optimizer was blocked\" message → **Open Anyway** → enter password"$'\n'
-          body+="- **macOS** (Local Network): click **Allow** when macOS asks to find devices on your local network. If no TV is found, click **Restart ADB**. If that doesn't help, open System Settings → Privacy & Security → Local Network, turn ATV Optimizer off and on again (every entry, if it's listed more than once), then click **Restart ADB** again."$'\n'
+          body+="    - **Terminal:** \`xattr -dr com.apple.quarantine \"/Applications/Android TV Optimizer.app\"\` (one-time, then double-click as normal)"$'\n'
+          body+="    - **GUI:** System Settings → Privacy & Security → scroll to the \"Android TV Optimizer was blocked\" message → **Open Anyway** → enter password"$'\n'
+          body+="- **macOS** (Local Network): click **Allow** when macOS asks to find devices on your local network. If no TV is found, click **Restart ADB**. If that doesn't help, open System Settings → Privacy & Security → Local Network, turn Android TV Optimizer off and on again (every entry, if it's listed more than once), then click **Restart ADB** again."$'\n'
           body+="- **Windows** (SmartScreen): \"More info\" → \"Run anyway\"."$'\n'
-          body+="- **Linux**: \`chmod +x ATV.Optimizer*.AppImage\` before running. For the Flatpak: \`flatpak install --user ATV.Optimizer_*_x86_64.flatpak\` (it doesn't update itself: install the next release's bundle the same way)."$'\n\n'
+          body+="- **Linux**: \`chmod +x Android.TV.Optimizer*.AppImage\` before running. For the Flatpak: \`flatpak install --user Android.TV.Optimizer_*_x86_64.flatpak\` (it doesn't update itself: install the next release's bundle the same way)."$'\n\n'
           body+="See the [README](https://github.com/${{ github.repository }}#readme) for setup and feature docs."
 
           # Emit as a multi-line output.
@@ -256,12 +256,30 @@ jobs:
         with:
           projectPath: v2
           tagName: ${{ needs.notes.outputs.tag }}
-          releaseName: 'ATV Optimizer ${{ needs.notes.outputs.tag }}'
+          releaseName: 'Android TV Optimizer ${{ needs.notes.outputs.tag }}'
           releaseBody: ${{ needs.notes.outputs.body }}
           releaseDraft: false
           prerelease: ${{ needs.notes.outputs.prerelease == 'true' }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+      - name: Package Windows portable ZIP
+        if: matrix.os == 'windows-latest'
+        id: portable
+        shell: pwsh
+        run: ./v2/scripts/package-portable.ps1
+
+      - name: Publish Windows portable ZIP
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.notes.outputs.tag }}
+          ARCHIVE: ${{ steps.portable.outputs.archive }}
+          CHECKSUM: ${{ steps.portable.outputs.checksum }}
+        run: |
+          gh release upload "$env:TAG" "$env:ARCHIVE" "$env:CHECKSUM" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Portable release upload failed' }
 
       # A failure here also holds back the Homebrew bump and the updater
       # manifest, which both need this job, so no installed copy updates to a
@@ -271,7 +289,8 @@ jobs:
         working-directory: v2
         run: |
           set -euo pipefail
-          app="target/universal-apple-darwin/release/bundle/macos/ATV Optimizer.app"
+          product=$(jq -r .productName src-tauri/tauri.conf.json)
+          app="target/universal-apple-darwin/release/bundle/macos/$product.app"
           expected=$(jq -r .identifier src-tauri/tauri.conf.json)
           info=$(codesign -dv "$app" 2>&1)
           echo "$info"
@@ -367,7 +386,7 @@ jobs:
     needs: [notes, build]
     name: Bump Homebrew tap
     runs-on: ubuntu-latest
-    if: success() && needs.notes.outputs.prerelease == 'false'
+    if: success() && github.repository == 'bryanroscoe/shield_optimizer' && needs.notes.outputs.prerelease == 'false'
     concurrency:
       group: v2-release-tap
       cancel-in-progress: false
@@ -419,7 +438,7 @@ jobs:
           set -euo pipefail
           # Tag is v2-X.Y.Z[-pre]; cask version is the part after v2-.
           version="${TAG#v2-}"
-          dmg_url="https://github.com/${{ github.repository }}/releases/download/${TAG}/ATV.Optimizer_${version}_universal.dmg"
+          dmg_url="https://github.com/${{ github.repository }}/releases/download/${TAG}/Android.TV.Optimizer_${version}_universal.dmg"
 
           # The cask was renamed from shield-optimizer; the tap's
           # cask_renames.json moves existing installs over.
@@ -658,7 +677,7 @@ jobs:
           TAG: ${{ needs.notes.outputs.tag }}
         run: |
           set -euo pipefail
-          galleries=(screenshots/gallery.gif screenshots/gallery-light.gif)
+          galleries=(screenshots/gallery.gif screenshots/gallery-light.gif ../assets)
           [[ -f mobile/screenshots/gallery.gif ]] && galleries+=(mobile/screenshots/gallery.gif mobile/screenshots/contact-sheet.png)
           if git diff --quiet -- "${galleries[@]}"; then
             echo "Galleries unchanged; nothing to commit."

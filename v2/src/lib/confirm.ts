@@ -18,7 +18,7 @@ export async function confirmAction(message: string): Promise<boolean> {
   if (asking) return false;
   asking = true;
   try {
-    if (isTauri()) return await nativeConfirm(message, { title: "ATV Optimizer", kind: "warning" });
+    if (isTauri()) return await nativeConfirm(message, { title: "Android TV Optimizer", kind: "warning" });
     return (await window.confirm(message)) === true;
   } catch (e) {
     console.error("Couldn't show the confirmation dialog; nothing was changed.", e);

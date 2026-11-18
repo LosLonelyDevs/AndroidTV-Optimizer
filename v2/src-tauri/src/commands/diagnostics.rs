@@ -591,7 +591,7 @@ fn upload_preamble(
     if let Some(commit) = &target.test_build {
         text.push_str(&format!("Test build {commit}\n\n"));
     }
-    text.push_str("## ATV Optimizer logs (Send logs)\n\n");
+    text.push_str("## Android TV Optimizer logs (Send logs)\n\n");
     text.push_str(&format!(
         "- Support ID: {} (`{}`)\n",
         format_support_id(&target.install_id),
@@ -796,7 +796,7 @@ mod tests {
         assert!(test.contains("- App version: 2.5.0-dev"));
         let release = upload_preamble(&target(None), true);
         assert!(
-            release.starts_with("## ATV Optimizer logs (Send logs)"),
+            release.starts_with("## Android TV Optimizer logs (Send logs)"),
             "{release}"
         );
         assert!(!release.contains("Test build"));

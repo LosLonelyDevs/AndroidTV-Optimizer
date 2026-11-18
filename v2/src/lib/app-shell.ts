@@ -15,6 +15,7 @@ export interface AppShell {
   readonly rollingOutVersion: string | null;
   /// Flatpak delivers updates; the in-app updater and its switch are off.
   readonly updatesViaFlatpak: boolean;
+  readonly portable: boolean;
   readonly checking: boolean;
   /// The outcome of the last check started from Settings, "" before one.
   readonly checkMessage: string;

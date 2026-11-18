@@ -11,6 +11,7 @@
 pub mod activity_log;
 pub mod adb;
 pub mod commands;
+mod portable;
 pub mod rename;
 pub mod session;
 pub use atv_optimizer_core::engine;
@@ -460,10 +461,15 @@ pub fn run() {
         .with_telemetry(telemetry.clone());
     load_cached_support_rules(&state);
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    let builder = if portable::is_portable() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    };
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(state)
         .manage(log_control)

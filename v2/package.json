@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:fork-tools": "node tests/fork-tools.mjs",
+    "test:portable-updates": "node tests/portable-updates.mjs",
     "test:ram": "node tests/ram-session.mjs",
     "test:installer-maintenance": "node tests/installer-maintenance.mjs",
     "dev": "vite dev",
@@ -51,7 +52,7 @@
     "e2e": "node e2e/run.mjs",
     "e2e:offline": "node e2e/run.mjs --offline",
     "e2e:replay": "node e2e/replay.mjs",
-    "screenshots": "node screenshots/capture.mjs && bash screenshots/build-gif.sh",
+    "screenshots": "node screenshots/capture.mjs && bash screenshots/build-gif.sh && node scripts/refresh-readme-assets.mjs",
     "tauri": "tauri",
     "subset-icons": "python3 scripts/subset-material-symbols.py",
     "test:device-logs": "node tests/log-poller.mjs && node tests/device-logs.mjs",

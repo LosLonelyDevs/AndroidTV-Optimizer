@@ -550,7 +550,7 @@ export interface AdbStatus {
   last_probe: string | null;
 }
 
-export type UpdateChannel = "self" | "flatpak";
+export type UpdateChannel = "self" | "flatpak" | "portable";
 
 export interface UpdateInfo {
   current: string;

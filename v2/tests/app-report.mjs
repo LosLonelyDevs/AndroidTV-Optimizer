@@ -251,7 +251,7 @@ async function exercise({ browser, base }) {
   await dialog.getByRole("button", { name: "Open GitHub issue" }).click();
   await page.waitForFunction(() => window.__OPENED__.length > 0);
   let url = new URL(await page.evaluate(() => window.__OPENED__.at(-1)));
-  assert.equal(url.origin + url.pathname, "https://github.com/bryanroscoe/shield_optimizer/issues/new");
+  assert.equal(url.origin + url.pathname, "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues/new");
   assert.equal(url.searchParams.get("template"), "app_report.yml");
   assert.equal(url.searchParams.get("package"), UNCATALOGUED);
   assert.equal(url.searchParams.get("reason"), "Wrong description");

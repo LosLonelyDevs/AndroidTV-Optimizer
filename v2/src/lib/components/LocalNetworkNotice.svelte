@@ -16,7 +16,7 @@
       <HelpTip label={LOCAL_NETWORK_BLOCKED}>
         <p>If macOS is asking right now, choose Allow.</p>
         <p>
-          Otherwise, click Open Privacy &amp; Security, then Local Network, and turn ATV Optimizer on.
+          Otherwise, click Open Privacy &amp; Security, then Local Network, and turn Android TV Optimizer on.
           If it is already on, turn it off and on again. If it's listed more than once, turn all of
           them on. {hostServer ? "Then Restart ADB." : "Then try again."}
         </p>

@@ -1,0 +1,37 @@
+name: Windows portable packaging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v2-*release.yml'
+      - '.github/workflows/v2-portable.yml'
+      - 'v2/scripts/*portable.ps1'
+      - 'v2/portable/**'
+      - 'v2/src-tauri/tauri.conf.json'
+      - 'v2/src-tauri/resources/**'
+  pull_request:
+    paths:
+      - '.github/workflows/v2-*release.yml'
+      - '.github/workflows/v2-portable.yml'
+      - 'v2/scripts/*portable.ps1'
+      - 'v2/portable/**'
+      - 'v2/src-tauri/tauri.conf.json'
+      - 'v2/src-tauri/resources/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify portable archive contents and checksums
+        shell: pwsh
+        run: ./v2/scripts/test-portable.ps1

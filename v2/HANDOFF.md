@@ -2,6 +2,13 @@
 
 ## Desktop fork integration, 2026-11-18
 
+Desktop branding is **Android TV Optimizer**. The Windows portable ZIP is packaged
+from the installer build by both release workflows; `portable.txt` beside the
+executable disables installer updates. It still uses the host's Windows profile
+and requires WebView2. The application identifier, updater key, MSI UpgradeCode
+and legacy NSIS registry keys remain pinned. See
+[the current fork review](../docs/FORK-REVIEW-2026-11-18.md).
+
 This fork is prepared as **2.6.0**, one minor increment above upstream **2.5.0**,
 rebased onto `5d829e0c`. This explicitly requested upstream-relative version is
 lower than the previous fork source version 2.6.1. No release tag or updater

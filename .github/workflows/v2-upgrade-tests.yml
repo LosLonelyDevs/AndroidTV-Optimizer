@@ -163,7 +163,7 @@ jobs:
             cp $b/msi/*.msi dist/new.msi
           else
             # The same layout as the updater's .app.tar.gz: one top folder.
-            tar -C $b/macos -czf dist/new-app.tar.gz "ATV Optimizer.app"
+            tar -C $b/macos -czf dist/new-app.tar.gz "Android TV Optimizer.app"
           fi
           ls -l dist
 
@@ -247,9 +247,9 @@ jobs:
         run: |
           set -euo pipefail
           pattern=$([[ "${{ matrix.old-kind }}" == msi ]] && echo '*_x64_en-US.msi' || echo '*_x64-setup.exe')
-          gh release download "v2-${{ matrix.old }}" --repo "$GITHUB_REPOSITORY" --pattern "$pattern" --dir old
+          gh release download "v2-${{ matrix.old }}" --repo bryanroscoe/shield_optimizer --pattern "$pattern" --dir old
           if [[ -n "${{ matrix.middle }}" ]]; then
-            gh release download "v2-${{ matrix.middle }}" --repo "$GITHUB_REPOSITORY" --pattern '*_x64-setup.exe' --dir middle
+            gh release download "v2-${{ matrix.middle }}" --repo bryanroscoe/shield_optimizer --pattern '*_x64-setup.exe' --dir middle
           fi
           ls -l old middle 2>/dev/null || true
 
@@ -324,7 +324,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download "v2-${{ matrix.old }}" --repo "$GITHUB_REPOSITORY" --pattern '*_universal.dmg' --dir old
+          gh release download "v2-${{ matrix.old }}" --repo bryanroscoe/shield_optimizer --pattern '*_universal.dmg' --dir old
           ls -l old
 
       - name: Run scenario

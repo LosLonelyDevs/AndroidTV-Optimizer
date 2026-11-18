@@ -1,0 +1,24 @@
+Android TV Optimizer: portable Windows edition
+
+Extract the whole ZIP into a folder, then run atv-optimizer.exe.
+Keep this file and the resources folder beside the executable.
+No app installation or administrator account is needed.
+
+Requires 64-bit Windows and Microsoft Edge WebView2 Runtime.
+If WebView2 is missing, install it from Microsoft:
+https://developer.microsoft.com/microsoft-edge/webview2/
+
+This is a no-install distribution, not a self-contained data directory.
+Settings, logs, saved snapshots and ADB pairing keys remain in your Windows
+user profile. Installed and portable copies share that profile. Moving the
+ZIP to another PC does not transfer settings or pairing keys.
+The built-in ADB engine needs no separate adb installation. Optional tools
+such as Google platform-tools and scrcpy may need separate downloads.
+
+To update: close the app, download the new portable ZIP from
+https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases
+and extract it into a new folder. Portable copies never launch the installer
+updater. Keep portable.txt beside the executable so this protection stays on.
+
+To remove the program, delete its extracted folder. Your Windows profile
+data remains available for the next run.

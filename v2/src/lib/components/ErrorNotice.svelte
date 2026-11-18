@@ -39,7 +39,7 @@
         action: action || undefined,
         device: device || undefined,
         tier: info ? TIER_LABEL[info.tier] : undefined,
-        app: "ATV Optimizer (desktop)",
+        app: "Android TV Optimizer (desktop)",
       },
     );
     try {

@@ -1,6 +1,6 @@
-# ATV Optimizer — developer guide
+# Android TV Optimizer: developer guide
 
-This is the source for the **ATV Optimizer desktop fork** (Tauri 2 + Rust + Svelte 5), and
+This is the source for the **Android TV Optimizer desktop fork** (Tauri 2 + Rust + Svelte 5), and
 for ATV Optimizer for Android in [`mobile/`](mobile/). Both share one audited engine in
 [`crates/core`](crates/core).
 
@@ -15,6 +15,28 @@ and `DeviceTools` supplies recording and storage exploration. Install APK retain
 the native installer flow and offers the fork's Folder & version manager.
 The same shared safety engine and active ADB driver serve both views.
 Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Windows portable releases
+
+Both `v2-release.yml` and `v2-manual-release.yml` run
+`scripts/package-portable.ps1` after Tauri builds the installers. The script uses
+`target/release/atv-optimizer.exe`, copies every configured bundle resource and
+adjacent DLL, and publishes a versioned x64 ZIP with its SHA-256 checksum.
+`scripts/test-portable.ps1` checks packaging without launching the app; the
+Windows portable packaging workflow runs it on relevant pushes and PRs.
+
+Keep `portable/portable.txt` beside the packaged executable. The desktop startup
+does not register the installer-updater plugin when that marker is present.
+Settings directs portable users to ZIP downloads instead. Data remains in the
+normal Windows profile and WebView2 remains a prerequisite; this is a no-install
+edition, not a self-contained data profile.
+
+The visible name is Android TV Optimizer. Keep `com.shieldoptimizer.app`, the
+updater public key, publisher and MSI UpgradeCode stable. NSIS retains its old
+registry keys while displaying the new name. See [installer notes](src-tauri/installer/README.md).
+
+`npm run screenshots` also refreshes the logo and README screenshots under
+`../assets/`. The logo sources are the original vector SVG and 1024px PNG.
 
 ## Technology choices
 

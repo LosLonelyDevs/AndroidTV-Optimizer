@@ -11,7 +11,7 @@
   height={size}
   viewBox="0 0 120 120"
   role="img"
-  aria-label="ATV Optimizer"
+  aria-label="Android TV Optimizer"
   style="display:block;border-radius:{size * 0.23}px"
 >
   <rect width="120" height="120" rx="28" fill="#C9F24E" />

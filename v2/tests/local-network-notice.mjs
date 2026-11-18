@@ -18,7 +18,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = process.env.LOCAL_NETWORK_EVIDENCE;
 process.env.VITE_DEMO = "1";
 
-const BLOCKED = "macOS is blocking ATV Optimizer from your local network.";
+const BLOCKED = "macOS is blocking Android TV Optimizer from your local network.";
 
 async function run(browser, base) {
   if (out) await mkdir(out, { recursive: true });
@@ -114,7 +114,7 @@ async function run(browser, base) {
     assert.equal(await trigger.getAttribute("aria-expanded"), "true");
     const help = await helpText.innerText();
     for (const phrase of [
-      "then Local Network, and turn ATV Optimizer on",
+      "then Local Network, and turn Android TV Optimizer on",
       "turn it off and on again",
       "If it's listed more than once, turn all of them on",
       "Then Restart ADB",
@@ -151,7 +151,7 @@ async function run(browser, base) {
     await page.getByRole("button", { name: "Add by IP" }).click();
     const err = page.locator(".connect-form .error-notice");
     await err.waitFor();
-    assert.match(await err.innerText(), /Couldn't reach 192\.168\.1\.9\. macOS is blocking ATV Optimizer/);
+    assert.match(await err.innerText(), /Couldn't reach 192\.168\.1\.9\. macOS is blocking Android TV Optimizer/);
     assert.equal(await page.locator(".connect-form").getByRole("button", { name: "Open Privacy & Security" }).count(), 0);
 
     // Access granted in System Settings; coming back to the window re-probes.
@@ -204,7 +204,7 @@ async function run(browser, base) {
       document.querySelector(".connect-form .error-notice")?.textContent.includes("may be blocking"),
     );
     const possible = await err.innerText();
-    assert.match(possible, /Try Restart ADB first.*If that doesn't help, macOS may be blocking local network access for ATV Optimizer, or a VPN or firewall app may be in the way\./s);
+    assert.match(possible, /Try Restart ADB first.*If that doesn't help, macOS may be blocking local network access for Android TV Optimizer, or a VPN or firewall app may be in the way\./s);
     assert.doesNotMatch(possible, /macOS is blocking/);
     assert.equal(await notice.count(), 0, "unknown never shows the blocked notice");
     const both = page.locator(".connect-form .remedies");
@@ -224,7 +224,7 @@ async function run(browser, base) {
     await macHelp.waitFor();
     const macText = await macHelp.innerText();
     assert.match(macText, /On a Mac, after an update, macOS can cut off an ADB server the earlier version left running, and Restart ADB replaces it\./);
-    assert.match(macText, /check that ATV Optimizer is on in Privacy & Security → Local Network/);
+    assert.match(macText, /check that Android TV Optimizer is on in Privacy & Security → Local Network/);
     await shot("local-network-connection-help");
     await macHelp.getByRole("button", { name: "Privacy & Security", exact: true }).click();
     assert.equal(await calls("open_local_network_settings"), 1, "calls restart with the reload");
@@ -249,7 +249,7 @@ async function run(browser, base) {
     await page.getByRole("button", { name: "Add by IP" }).click();
     await err.waitFor();
     const nativeBlocked = await err.innerText();
-    assert.match(nativeBlocked, /Couldn't reach 192\.168\.1\.9\. macOS is blocking ATV Optimizer.*then try again\./s);
+    assert.match(nativeBlocked, /Couldn't reach 192\.168\.1\.9\. macOS is blocking Android TV Optimizer.*then try again\./s);
     assert.doesNotMatch(nativeBlocked, /Restart ADB|server/);
 
     await page.evaluate(() => (window.ln.status = "unknown"));
@@ -280,7 +280,7 @@ async function run(browser, base) {
     await page.reload({ waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "No devices connected.", exact: true }).waitFor();
     const nativeMacHelp = await page.locator(".help-details .local-network-help").innerText();
-    assert.match(nativeMacHelp, /check that ATV Optimizer is on in Privacy & Security → Local Network/);
+    assert.match(nativeMacHelp, /check that Android TV Optimizer is on in Privacy & Security → Local Network/);
     assert.doesNotMatch(nativeMacHelp, /Restart ADB|server/);
     await page.evaluate(() => {
       localStorage.removeItem("shieldopt.demo.noDevices");

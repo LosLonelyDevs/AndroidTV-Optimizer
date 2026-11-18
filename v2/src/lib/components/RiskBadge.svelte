@@ -56,7 +56,7 @@
     {#if overridden}
       <p class="hc-body hc-ok">
         ✓ You marked this app safe on this device — risk warnings and loud
-        confirms are suppressed. Shield Optimizer remembers this next time you
+        confirms are suppressed. Android TV Optimizer remembers this next time you
         connect this device.
       </p>
     {/if}

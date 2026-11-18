@@ -22,6 +22,9 @@ this file and shows the newest few sections, dated, from its version button.
 
 ## Unreleased
 
+- Add Windows portable ZIPs and SHA-256 checksums to automatic and manual desktop releases. Portable copies use the Windows profile for data and download ZIP updates without launching an installer.
+- Use Android TV Optimizer consistently in desktop branding, installer labels and fork release links while retaining upgrade identifiers. Add the original vector/1024px logo and current demo screenshots to the README, with a reviewed list of fork additions.
+
 - Rebase the desktop fork onto upstream `5d829e0c` and retain the fork's RAM controls, installer identity, updater key and channel. Set the source version to 2.6.0 as requested (upstream 2.5.0 plus one minor); this is lower than the prior fork source version 2.6.1 and does not publish an updater manifest.
 
 - Anonymous reports: the report server keeps raw reports for 30 days instead of 90, and its privacy policy and Android's More › Privacy help say so. Per-model totals are kept longer, as before.

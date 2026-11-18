@@ -129,6 +129,6 @@ jobs:
           TAG: ${{ inputs.upload-tag }}
         run: |
           version="${TAG#v2-}"
-          asset="ATV.Optimizer_${version}_x86_64.flatpak"
+          asset="Android.TV.Optimizer_${version}_x86_64.flatpak"
           mv atv-optimizer.flatpak "$asset"
           gh release upload "$TAG" "$asset" --clobber --repo "$GITHUB_REPOSITORY"

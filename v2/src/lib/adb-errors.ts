@@ -36,7 +36,7 @@ export interface ExplainedFailure {
   localNetwork: LocalNetworkHint;
 }
 
-export const LOCAL_NETWORK_BLOCKED = "macOS is blocking ATV Optimizer from your local network.";
+export const LOCAL_NETWORK_BLOCKED = "macOS is blocking Android TV Optimizer from your local network.";
 
 const NO_ROUTE = /no route to host|host is unreachable|ehostunreach/i;
 
@@ -61,10 +61,10 @@ const STALE_SERVER =
 
 /// macOS may be blocking local network access, or something else is.
 export const LOCAL_NETWORK_POSSIBLE =
-  "macOS may be blocking local network access for ATV Optimizer, or a VPN or firewall app may be in the way.";
+  "macOS may be blocking local network access for Android TV Optimizer, or a VPN or firewall app may be in the way.";
 
 const LOCAL_NETWORK_SETTINGS =
-  "Turn ATV Optimizer on in System Settings → Privacy & Security → Local Network (off and on again if it already is)";
+  "Turn Android TV Optimizer on in System Settings → Privacy & Security → Local Network (off and on again if it already is)";
 
 const LOCAL_NETWORK_SENTENCE: Record<Exclude<LocalNetworkHint, null>, string> = {
   blocked: `${LOCAL_NETWORK_BLOCKED} ${LOCAL_NETWORK_SETTINGS}, then Restart ADB.`,

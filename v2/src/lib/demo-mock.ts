@@ -31,7 +31,8 @@ import type {
   TweaksState,
 } from "./types";
 
-const SERIAL = "192.168.1.42:5555";
+const DEMO_SUBNET = demoValue("documentationNetwork") === "1" ? "192.0.2" : "192.168.1";
+const SERIAL = `${DEMO_SUBNET}.42:5555`;
 
 const device: Device = {
   id: 1,
@@ -61,7 +62,7 @@ const device: Device = {
   },
   support: {
     tier: "fully_supported",
-    note: "NVIDIA SHIELD is the device this app is built and tested on.",
+    note: "This Android TV model has established support in the upstream device catalog.",
   },
 };
 
@@ -71,7 +72,7 @@ const device: Device = {
 /// openable, and labelled UNCONFIRMED TV.
 const unconfirmedDevice: Device = {
   id: 2,
-  serial: "192.168.1.77:5555",
+  serial: `${DEMO_SUBNET}.77:5555`,
   name: "Living Room Box",
   model: "MiBOX4",
   device_type: "unknown",
@@ -125,7 +126,7 @@ const usbDevice: Device = {
   },
   support: {
     tier: "fully_supported",
-    note: "NVIDIA SHIELD is the device this app is built and tested on.",
+    note: "This Android TV model has established support in the upstream device catalog.",
   },
 };
 
@@ -134,7 +135,7 @@ const usbDevice: Device = {
 /// (#120). Behind the `notTv` demo flag so the gallery is unchanged.
 const phoneDevice: Device = {
   id: 4,
-  serial: "192.168.1.88:37015",
+  serial: `${DEMO_SUBNET}.88:37015`,
   name: "Pixel Tablet",
   model: "Pixel Tablet",
   device_type: "unknown",
@@ -163,7 +164,7 @@ const phoneDevice: Device = {
 /// `not_supported`. Behind the `fireTv` demo flag so the gallery is unchanged.
 const fireTvDevice: Device = {
   id: 5,
-  serial: "192.168.1.91:5555",
+  serial: `${DEMO_SUBNET}.91:5555`,
   name: "Fire TV Stick",
   model: "AFTKA",
   device_type: "google_tv",
@@ -210,10 +211,10 @@ function demoFlag(name: string): boolean {
 /// `approvalAutoAllow` makes it choose Allow 4 seconds after it is asked, so
 /// the approval dialog can be seen waiting and then closing by itself. Other
 /// flags vary how the request ends (see `approvalDemoFlags`).
-const APPROVAL_TV = "192.168.1.88:5555";
+const APPROVAL_TV = `${DEMO_SUBNET}.88:5555`;
 /// The key the TV's row keeps when its approved transport is folded into
 /// another row by hardware id (`approvalMerges`).
-const APPROVAL_TV_MERGED = "192.168.1.88:40001";
+const APPROVAL_TV_MERGED = `${DEMO_SUBNET}.88:40001`;
 type ApprovalDemoState = "not_allowed" | "asked" | "allowing" | "allowed";
 const approvalDemo: {
   state: ApprovalDemoState;
@@ -410,7 +411,7 @@ const LOG_DIR = "/Users/you/Library/Application Support/ATVOptimizer/logs";
 function demoDiagnostics(serial: string | null): string {
   const target = serial ? demoDevices().find((d) => d.serial === serial) : null;
   const lines = [
-    "## ATV Optimizer diagnostics",
+    "## Android TV Optimizer diagnostics",
     "",
     `- App version: ${pkg.version}`,
     "- OS: macos (aarch64)",
@@ -728,7 +729,7 @@ const snapshots: SnapshotFile[] = [
     saved_at: "2026-04-28T09:15:33Z",
     label: null,
     device_name: "SHIELD (Bedroom)",
-    device_serial: "192.168.1.57:5555",
+    device_serial: `${DEMO_SUBNET}.57:5555`,
     device_type: "shield",
     disabled_count: 19,
     settings_count: 4,
@@ -959,13 +960,13 @@ export function handle(cmd: string, args: Record<string, unknown>): unknown {
         // the ordinary state of the app is the one the gallery should show.
         latest: demoFlag("updateAhead") ? "2.9.9" : pkg.version,
         update_available: demoFlag("updateAhead"),
-        url: "https://github.com/bryanroscoe/shield_optimizer/releases",
+        url: "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases",
         // The app reads its own notes from the bundled CHANGELOG.md and never
         // from here. Null is what a failed or timed-out GitHub call returns.
         current_notes: null,
       };
     case "update_channel":
-      return demoFlag("flatpak") ? "flatpak" : "self";
+      return demoFlag("portable") ? "portable" : demoFlag("flatpak") ? "flatpak" : "self";
     case "list_devices":
       // The built-in engine is network-only, so it never lists a USB device.
       return adbEngineStatus().active === "builtin"
@@ -1442,7 +1443,7 @@ export function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "probe_paired_connect":
       return { state: "waiting" };
     case "local_address_for":
-      return "192.168.1.10";
+      return `${DEMO_SUBNET}.10`;
     case "reprompt_device":
       if (approvalTvListed() && String(args.serial) === APPROVAL_TV && approvalState() !== "allowed") {
         askApprovalTv();

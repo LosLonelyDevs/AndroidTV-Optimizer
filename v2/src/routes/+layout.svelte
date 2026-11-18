@@ -51,7 +51,7 @@
 
   installBreadcrumbs();
   if (typeof window !== "undefined") installGlobalErrorReporting(send);
-  const RELEASES_PAGE = "https://github.com/bryanroscoe/shield_optimizer/releases";
+  const RELEASES_PAGE = "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases";
   const changelog = parseChangelog(changelogSource);
 
   let update = $state<UpdateInfo | null>(null);
@@ -63,6 +63,7 @@
   /// Inside a Flatpak, /app is read-only and Flatpak delivers new versions, so
   /// the in-app updater never runs and update notices point there instead.
   let viaFlatpak = $state(false);
+  let portable = $state(false);
   let updateBusy = $state(false);
   let updateInstalled = $state(false);
   let updateProgress = $state("");
@@ -160,12 +161,14 @@
     checking = true;
     checkMessage = "";
     try {
-      if (viaFlatpak) {
+      if (viaFlatpak || portable) {
         const u = await api.checkForUpdate();
         update = u;
         checkMessage =
           u.update_available && u.latest
-            ? `v${u.latest} is out. Run flatpak update, or install the new .flatpak from the Releases page if you downloaded this one.`
+            ? portable
+              ? `v${u.latest} is out. Download and extract the new portable ZIP from All releases.`
+              : `v${u.latest} is out. Run flatpak update, or install the new .flatpak from the Releases page if you downloaded this one.`
             : "No update found. You have the latest version.";
         return;
       }
@@ -214,6 +217,9 @@
     get updatesViaFlatpak() {
       return viaFlatpak;
     },
+    get portable() {
+      return portable;
+    },
     get checking() {
       return checking;
     },
@@ -254,10 +260,11 @@
       .updateChannel()
       .then((channel) => {
         viaFlatpak = channel === "flatpak";
+        portable = channel === "portable";
       })
       .catch(() => {})
       .finally(() => {
-        if (!viaFlatpak) checkForUpdate();
+        if (!viaFlatpak && !portable) checkForUpdate();
       });
     return stopLocalNetworkWatch;
   });
@@ -310,6 +317,7 @@
   }
 
   async function installUpdate() {
+    if (portable) return;
     if (!pendingUpdate || updateBusy) return;
     updateBusy = true;
     updateProgress = "Downloading…";
@@ -399,7 +407,7 @@
   // to submit. Send logs (Settings) is the separate, explicit upload.
 
   const ISSUE_BASE =
-    "https://github.com/bryanroscoe/shield_optimizer/issues/new" +
+    "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues/new" +
     `?template=bug_report.yml&title=${encodeURIComponent("Bug: ")}`;
   /// Well under the ~8 KB GitHub accepts in a URL. Past it the form opens with
   /// Diagnostics empty and the dialog asks for a paste instead.
@@ -501,7 +509,7 @@
   <header>
     <div class="brand">
       <BrandMark size={22} />
-      <span class="title">ATV Optimizer</span>
+      <span class="title">Android TV Optimizer</span>
       {#if currentVersion}
         <button
           class="version"
@@ -605,7 +613,7 @@
   <ContextMenu />
   <footer>
     <button class="kofi" onclick={() => openUrl("https://ko-fi.com/bryanroscoe")}>
-      <Icon name="local_cafe" size={16} /> Enjoying ATV Optimizer? Support it on Ko-fi
+      <Icon name="local_cafe" size={16} /> Enjoying Android TV Optimizer? Support it on Ko-fi
     </button>
   </footer>
 </div>

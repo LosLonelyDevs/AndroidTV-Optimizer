@@ -866,13 +866,13 @@ pub enum BundleRename {
 }
 
 pub const LEGACY_BUNDLE_NAME: &str = "Shield Optimizer.app";
-pub const BUNDLE_NAME: &str = "ATV Optimizer.app";
+pub const BUNDLE_NAME: &str = "Android TV Optimizer.app";
 
 /// Where the host's Homebrew lives (Apple silicon, then Intel). A GUI app
 /// does not see `HOMEBREW_PREFIX`.
 pub const CASKROOMS: &[&str] = &["/opt/homebrew/Caskroom", "/usr/local/Caskroom"];
 
-/// Rename `Shield Optimizer.app` to `ATV Optimizer.app` beside it.
+/// Rename `Shield Optimizer.app` to `Android TV Optimizer.app` beside it.
 ///
 /// Runs as the app exits, never at startup: the running process keeps its
 /// launch path for `current_exe`, resources and the updater, so renaming
@@ -882,7 +882,10 @@ pub fn rename_legacy_bundle(exe: &Path, home: &Path, caskrooms: &[&Path]) -> Bun
     let Some(bundle) = bundle_of(exe) else {
         return BundleRename::NotABundle;
     };
-    if bundle.file_name().and_then(|n| n.to_str()) != Some(LEGACY_BUNDLE_NAME) {
+    if !matches!(
+        bundle.file_name().and_then(|n| n.to_str()),
+        Some(LEGACY_BUNDLE_NAME | "ATV Optimizer.app")
+    ) {
         return BundleRename::NotLegacyName;
     }
     if bundle

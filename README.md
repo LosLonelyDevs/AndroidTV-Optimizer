@@ -1,263 +1,119 @@
-# ATV Optimizer
+<p align="center">
+  <img src="assets/android-tv-optimizer.svg" alt="Android TV Optimizer logo" width="160">
+</p>
 
-This desktop fork adds grouped Display, Audio, Input and Device settings, a unified
-all-apps view, per-device risk overrides, quick installation and Shizuku setup,
-APK version management, recording, storage tools and saved device addresses.
-See the [fork feature guide](docs/FORK-DIFFERENCES-2026-10-22.md) and
-[current integration notes](v2/HANDOFF.md).
+# Android TV Optimizer
 
-Debloat and tune your Android TV from your computer. Disable bloat, switch launchers, sideload
-APKs, adjust HDMI-CEC and frame-rate matching, and check device health, all from a desktop app.
-Works on **Nvidia Shield TV, Onn 4K Pro, Chromecast with Google TV, Google TV Streamer** and other
-Android TV devices.
+Manage, debloat and tune Android TV and Google TV from your computer. Browse installed apps, switch launchers, sideload APKs and adjust device settings without a terminal.
 
-> **Known ADB issue in 2.4.1:** A SHIELD TV Pro on macOS has been reported missing from Scan LAN
-> or going offline until connected with standalone ADB. [Workaround and status](#known-limitations).
+This is my desktop fork of [Bryan Roscoe's ATV Optimizer](https://github.com/bryanroscoe/shield_optimizer), previously called Shield Optimizer. I'm building this for Android TV more broadly, including Google TV, onn., Chromecast and NVIDIA Shield. Features still depend on your device's firmware and ADB permissions.
 
-<img alt="ATV Optimizer walkthrough (dark)" src="v2/screenshots/gallery.gif" />
+**[Download for Windows, macOS or Linux](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases)** · [Report a problem](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues) · [Build from source](v2/README.md)
+
+## What I've added
+
+Upstream provides the core device discovery, ADB, safety catalog, debloating and recovery features. My changes build on that:
+
+- **RAM controls with before/after measurements.** RAM refresh starts when you ask and can be stopped. Restrict eligible apps' background activity with saved Undo, or compare three launch trials before and after a change. The results show what changed on your device; they don't promise a speedup.
+- **One app table with more control.** Curated and discovered apps share the same view, with usage, RAM, recommendations and maintenance actions. I've added per-app cache/data clearing, per-device risk overrides and usage recommendations that account for uptime. An override cannot bypass the protected-package block.
+- **Grouped device settings and remembered devices.** Display, Audio, Input, Device and Advanced controls live together. There are extra display, audio and system controls, plus saved addresses and background-process-limit pins. Saved tweaks require a verified hardware ID; matching an IP address isn't enough.
+- **More useful APK management.** Quick install downloads compatible release assets from a curated catalog. The folder manager compares APK versions with installed versions, handles downgrade attempts and includes Shizuku setup. This extends upstream's sideloading and APK inspection.
+- **Recording, mirroring and diagnostics.** Record the TV screen, open a separate scrcpy mirror window, inspect storage and larger files, and review actions in the activity console. Recording currently needs the Google platform-tools engine; some tools require a separate download.
+
+These additions were checked against upstream `5d829e0c` on November 18, 2026. See the [fork review](docs/FORK-REVIEW-2026-11-18.md) for source links and validation limits. This update also adds automatic portable Windows ZIP packaging alongside the installers.
+
+## Screenshots
+
+I captured these screens with simulated TVs. The app and model names are real. The network addresses, device identifiers, files, logs and RAM measurements are demo data.
+
+<p align="center">
+  <img src="assets/screenshots/overview.png" alt="Connected Android TV device overview" width="960">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/all-apps.png" alt="Unified app table with recommendations and RAM usage" width="960">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/ram-results.png" alt="RAM controls showing baseline and comparison results" width="960">
+</p>
 
 <details>
-<summary>Light theme</summary>
+<summary>Display settings and full walkthroughs</summary>
 
-<img alt="ATV Optimizer walkthrough (light)" src="v2/screenshots/gallery-light.gif" />
+<img src="assets/screenshots/device-display.png" alt="Grouped display settings" width="960">
+
+<img src="v2/screenshots/gallery.gif" alt="Android TV Optimizer dark-theme walkthrough" width="960">
+
+<img src="v2/screenshots/gallery-light.gif" alt="Android TV Optimizer light-theme walkthrough" width="960">
 
 </details>
 
-It's a native app for macOS, Windows and Linux. It connects to your TVs directly with its own
-built-in ADB, finds them on your network, and updates itself. You don't need a terminal, Google's
-`adb` or any scripting. Google's platform-tools are still one click away in **Settings → ADB** if a
-TV doesn't get along with the built-in engine, or for a TV connected by USB.
+The logo is available as an [SVG](assets/android-tv-optimizer.svg) and the original [1024×1024 PNG](assets/android-tv-optimizer-1024.png). [Asset generation](assets/README.md) runs with the screenshot pipeline.
 
-> **📱 Coming soon: [ATV Optimizer for Android](#atv-optimizer-for-android).** A phone and tablet
-> version that runs the same cleanup over Wi-Fi, with no computer involved. It's in testing now.
+## Download and run
 
-## Install
+Choose the latest stable `v2-*` release from **[this fork's Releases page](https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases)**. Source changes appear in release downloads after a new release is published.
 
-### macOS: Homebrew (easiest)
+| Platform | Download |
+| --- | --- |
+| Windows, no installation | `Android-TV-Optimizer_*_windows_x64_portable.zip` |
+| Windows, installed | `.msi` or `_x64-setup.exe` |
+| macOS | `_universal.dmg`, for Apple Silicon and Intel |
+| Linux | `.AppImage`, `.deb` or `.rpm` |
 
-```sh
-brew tap bryanroscoe/shield-optimizer
-brew install --cask atv-optimizer
-```
+**Portable Windows:** extract the whole ZIP, then run `atv-optimizer.exe`. Keep `portable.txt` and `resources/` beside it. It needs Microsoft Edge WebView2 Runtime; [install WebView2 from Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) if it's missing. Each ZIP has a `.sha256` checksum beside it.
 
-Homebrew clears the macOS quarantine flag for you, so the app opens with a normal double-click.
-Upgrade with `brew upgrade --cask atv-optimizer`, or let the app update itself.
+Portable means no app installer. Settings, logs, snapshots and pairing keys stay in your Windows user profile, shared with an installed copy. They don't travel with the ZIP. To update, close the app and extract a newer ZIP. Portable mode never launches the installer updater.
 
-### Any platform: download an installer
-
-Get an installer from the [**Releases page**](https://github.com/bryanroscoe/shield_optimizer/releases).
-Choose the newest stable `v2-*` desktop release; `v0.*` releases contain the legacy PowerShell script:
-
-| OS | File |
-|----|------|
-| Windows | `.msi` or `_x64-setup.exe` |
-| macOS | `_universal.dmg` (Apple Silicon + Intel) |
-| Linux | `.AppImage`, `.deb`, `.rpm`, or `_x86_64.flatpak` |
+The app has a built-in network ADB engine. For USB devices or compatibility problems, choose **Settings → ADB → Google platform-tools**. You can switch back later.
 
 ### First launch
 
-The builds aren't code-signed yet, so your OS may warn you the first time you open the app. You
-only have to dismiss it once:
+Builds aren't signed with a trusted publisher certificate yet:
 
-- **macOS** (`.dmg` only, Homebrew skips this): on macOS 15+ the dialog only offers *Move to
-  Trash* / *Done*. Click **Done**, then either go to System Settings → Privacy & Security →
-  **Open Anyway**, or run `xattr -dr com.apple.quarantine "/Applications/ATV Optimizer.app"`.
-- **Windows** (SmartScreen): **More info → Run anyway**.
-- **Linux**: `chmod +x ATV.Optimizer*.AppImage` before running the AppImage.
-  The Flatpak installs with `flatpak install --user ATV.Optimizer_*_x86_64.flatpak`. It doesn't
-  update itself: install the next release's `.flatpak` the same way.
+- **Windows:** SmartScreen may show **More info → Run anyway**.
+- **macOS:** open System Settings → Privacy & Security → **Open Anyway**. Allow local network access when asked. For a DMG install, `xattr -dr com.apple.quarantine "/Applications/Android TV Optimizer.app"` also removes the quarantine flag.
+- **Linux:** make the downloaded AppImage executable before opening it.
 
-On macOS 15+, also click **Allow** when macOS asks whether ATV Optimizer can find devices on your
-local network. Without it, the app can't reach any TV.
+The upstream Homebrew tap distributes upstream's app. Use this fork's release downloads for the additions listed above.
 
-## Before you start
+## Connect your TV
 
-Turn on ADB on the TV. You only do this once:
+1. On the TV, open **Settings → About** and select **Build** seven times to enable Developer Options.
+2. Enable **Network debugging** or **Wireless debugging** in Developer Options.
+3. Open the desktop app and use **Scan LAN**, **Add by IP** or **Pair PIN**. Approve this computer on the TV when prompted.
 
-1. **Settings → Device Preferences → About →** select **Build** 7 times to unlock Developer Options.
-2. **Settings → Developer Options →** turn on **Network debugging**, or **Wireless debugging** if
-   that's what your TV offers. Many Google TV devices only have Wireless debugging.
+Android 11+ wireless debugging can use separate pairing and connection ports. Use the pairing port with **Pair PIN**, then the connection address from the main Wireless debugging screen with **Add by IP**.
 
-The TV has to allow this computer once. A TV that hasn't yet is listed as **Not allowed yet**:
-click **Request approval**, then on the TV tick **Always allow from this computer** and choose
-**Allow**.
+If a Mac can't reach any TV, check **System Settings → Privacy & Security → Local Network**. With Google platform-tools selected, **Restart ADB** can recover an older server left running after an update. Restarting that server also disconnects other tools using it.
 
-## Using it
+## Safety and device support
 
-1. Launch the app. It scans your network and lists the Android TV devices it finds.
-2. For a TV marked **Not allowed yet**, click **Request approval** and choose **Allow** on the TV.
-3. Click your device. Each tab is a feature:
+The app shows the connected model's support tier. Unknown or unreadable devices stay unknown. Supporting Android TV broadly does not mean every setting works on every model.
 
-| Tab | What it does |
-|-----|--------------|
-| **Overview** | Model, Android version, build and hardware ID. |
-| **Health** | Temperature, CPU and network sampling, RAM and storage, display mode and HDR, audio, and the apps using the most memory, each with a safety verdict. |
-| **RAM** | Record baseline/comparison memory sessions, restrict eligible apps' background activity with saved undo, and benchmark app launch time and RAM before/after. See [RAM workflow and limits](docs/RAM-WORKFLOW.md). |
-| **Playback** | What the TV is actually outputting: resolution, refresh rate, HDR and audio passthrough. |
-| **Launcher** | Install a supported launcher, make it the default, and, where the firmware allows it, disable the stock launcher after you confirm. |
-| **App List** | Disable, enable or uninstall any app, or install one from the Play Store. |
-| **Optimize** | The debloat wizard. Review each app's recommended action and RAM use, untick anything you want to keep, then **Run**. Undo it later with Restore. |
-| **Tweaks** | HDMI-CEC, match-content frame rate, long-press timeout, animation speed, display scaling, audio passthrough, Private DNS. |
-| **Remote** | An on-screen D-pad and live typing over a low-latency channel. Paste a long URL or password instead of typing it on the TV. |
-| **Files** | Browse `/sdcard`, copy files to and from your computer, and find an app's exported backups. |
-| **Install APK** | Sideload an `.apk` from a folder. |
-| **Snapshot** | Save a device's state and re-apply it later, to the same device (rollback) or a different one (clone). |
-| **Shell** | Run an ADB shell command directly, for anything the UI doesn't cover. |
+- Curated actions keep the mandatory do-not-disable list. Disabling is usually reversible; uninstalling or clearing app data can remove information Restore cannot recover.
+- Snapshots and RAM Undo have different scopes. A snapshot is not a full device backup, and RAM Undo restores only the recorded restriction.
+- The expert shell runs commands you supply. Its warnings do not provide the curated actions' safety guarantees.
+- Fire OS and other firmware can refuse launcher or system changes. The app reports those refusals rather than promising a workaround.
+- Physical-device performance gains from this fork's RAM controls remain unverified. Local tests and demo screenshots are separate evidence.
 
-### Can't find your TV?
-
-Use **Scan LAN**, **Add by IP** or **Pair PIN**.
-
-**A TV that has never allowed this computer** is listed as **Not allowed yet**. Scanning never
-shows anything on the TV. Click **Request approval** on its row: the TV asks "Allow debugging?"
-(some say "Allow USB debugging?"). Tick **Always allow from this computer** and choose Allow. The
-app waits up to 10 minutes; **Cancel** stops waiting. TVs that already allow Google's `adb` on this
-computer connect without asking. With Google platform-tools chosen in Settings, the TV asks by
-itself the first time the app connects instead.
-
-**On a Mac, if nothing is found even by IP,** macOS may be blocking the app: open System Settings →
-Privacy & Security → **Local Network** and turn ATV Optimizer on. If it already looks on, turn it
-off and on again. If it's listed more than once, turn every entry on. Then scan again.
-
-With **Google platform-tools** chosen in Settings, click **Restart ADB** first instead: after an
-update, macOS cuts off the ADB server the previous version left running. The app restarts it by
-itself when it notices, and a manual restart does the same.
-
-**Scan LAN** looks two ways. It sweeps your subnet on ADB's standard port (5555), which older
-devices like the Shield use. It also listens for TVs that announce themselves over mDNS. That second
-check matters on Android 11+, where Wireless debugging listens on a random port that changes every
-time you toggle it, so a port sweep can't find it. If a TV is only advertising its pairing service,
-the scan tells you and fills in the pairing address for you.
-
-**Pair PIN** is for Android 11+ Wireless debugging. On the TV, open **Pair device with pairing
-code** and enter the IP:port and code it shows. Pairing makes the TV trust your computer but doesn't
-connect to it. Go back to the main Wireless debugging screen and enter the IP:port shown *there* in
-**Add by IP**. It's a different port from the pairing one. If ADB connects the paired TV on its
-own, it shows up when the device list refreshes.
-
-## Safety
-
-- **Disable, don't uninstall.** Disabled apps can usually be re-enabled, but firmware permissions
-  may prevent it. Uninstalling can remove data that Restore can't bring back.
-- A curated **do-not-disable list** blocks disables that would break the device, in every curated
-  action: Optimize, App List, the Launcher wizard and Snapshot apply.
-- **Recovery** asks the TV to re-enable every disabled package and reports any it refused.
-- The **Shell** tab is the exception: it runs whatever you type. Its warnings are there for a
-  reason. A bad command can erase data or leave the device unusable.
-
-**Use at your own risk.** Changing system apps always carries some risk, but the app favors safe,
-reversible changes.
-
-## Tested devices
-
-| Device | Status |
-|--------|--------|
-| Nvidia Shield TV (2015/2017/2019) | Fully tested |
-| Onn 4K Pro (Walmart) | Fully tested |
-| Chromecast with Google TV | Should work (Google TV profile) |
-| Google TV Streamer (2024) | Should work (Google TV profile) |
-| TCL Google TV | Beta: limited testing so far |
-| Amazon Fire TV | Not supported: Fire OS blocks the changes this app makes (see [Known limitations](#known-limitations)) |
-
-What's available depends on each device's firmware and the permissions it grants ADB. Android
-version alone doesn't decide it. Discovery and pairing need the firmware to expose a working ADB
-service, authorize the connection, and be reachable on your network.
-
-The app shows each connected TV's support status next to its name: **Fully supported**,
-**Supported**, **Beta**, **Not supported**, or **Not verified** for a model nobody has checked yet.
-The status is information only. It never loosens the do-not-disable list, and on an unsupported TV
-the app warns before making changes but still lets you re-enable apps and run Recovery.
+Shield names still appear where they identify actual NVIDIA hardware, device-specific controls or legacy compatibility. The desktop product name is **Android TV Optimizer**. Existing application identifiers, updater keys and installer registry keys stay stable so a visible rename does not discard settings or break upgrades.
 
 ## Privacy
 
-The app sends **anonymous device and error reports** by default, so we can learn which TVs it runs
-on and where it fails. A report has your TV's make, model and Android version, the app version and
-your computer's or phone's OS, which actions worked or failed, and error messages with addresses,
-names and file paths removed. It never includes serial numbers or other hardware IDs, IP addresses,
-TV names, your list of installed apps, file paths, license details or snapshot contents. Reports go
-to a server we run on Cloudflare and are kept for 30 days; totals per TV model, with the random
-install ID used to count installs, are kept longer. The server doesn't record where a
-report came from: no IP address and no location, not even your country.
+Builds configured with a telemetry endpoint can send anonymous device and error reports. Reports include model, Android version, app version and outcomes, with addresses, hardware IDs and paths removed. Review **Report a bug** and its sharing controls before sending diagnostics. Automatic reporting can be disabled there. Builds without a configured endpoint send no reports.
 
-Turn this off with **Share anonymous device and error reports**, in the **Report a bug** dialog on
-desktop or on the **More** screen on Android. Turning it off stops sending immediately and discards anything not yet sent; turning it
-back on starts over under a new random ID. Builds made without a report server configured send
-nothing.
+The upstream reporting service retains raw reports for 30 days and model totals longer. See the [telemetry documentation](v2/telemetry-worker/README.md). This fork retains that implementation; a source checkout alone does not establish which endpoint a particular release uses.
 
-## Known limitations
+## Related projects
 
-**ADB discovery and reconnection.**
-
-[Issue #235](https://github.com/bryanroscoe/shield_optimizer/issues/235) reports a SHIELD TV Pro on macOS running
-2.4.1 being missed by **Scan LAN**, or later appearing **OFFLINE**, until connected with standalone
-ADB and refreshed in the app. The full cause is still under investigation.
-
-If this happens, try **Add by IP** with the TV's current address, approve any debugging prompt on
-the TV, then **Refresh**. The reporter has not confirmed whether Add by IP avoids this failure;
-the recovery they verified used standalone ADB. **Restart ADB** disconnects other tools using the
-same server, and did not recover the reporter's connection in 2.4.1.
-
-Connection-recovery improvements are merged for the next desktop release and await physical
-confirmation of this report. They are not included in 2.4.1.
-
-**Built-in ADB is network-only.** A TV connected by USB needs **Google platform-tools**, chosen in
-**Settings → ADB → ADB engine**. Switching takes effect immediately, and you can switch back.
-
-**Fire TV launcher changes depend on the build.** Some Fire OS builds refuse changes to Amazon's
-protected stock launcher, including attempts to re-enable it. The app recognizing Projectivy or
-another supported launcher doesn't mean the firmware will let you change Home or disable stock.
-When a change fails, the app reports three things separately: the command error, whether its
-precautionary restore worked, and which Home app the TV actually reports. It doesn't try to get
-around firmware protection. [Issue #205](https://github.com/bryanroscoe/shield_optimizer/issues/205)
-tracks a Toshiba Fire TV report that's still waiting on version and build details.
-
-**Unsigned builds.** See [First launch](#first-launch) above.
-
-**Renamed from Shield Optimizer.** It's the same app with the same update channel. From 2.5.0 it
-also uses the new name for its data folder and app identifier: the first launch copies your
-settings, snapshots and logs over and leaves the old copies in place. On Windows, the 2.5.0
-`-setup.exe` installer (and an in-app update of a setup install) removes a leftover "Shield
-Optimizer" install; the `.msi` doesn't, so remove that one from Add/Remove Programs yourself. On
-macOS, a `Shield Optimizer.app` renames itself to `ATV Optimizer.app` when you quit it. If you
-have both `Shield Optimizer.app` and `ATV Optimizer.app` (for example from installing a DMG beside
-an older copy), drag `Shield Optimizer.app` to the Trash. The Homebrew cask is now
-`atv-optimizer`; `shield-optimizer` keeps working and `brew upgrade` moves you over.
-
-## ATV Optimizer for Android
-
-**Coming soon.** A phone and tablet version that drives your TV over Wi-Fi with no computer
-involved: the same app list, safety checks, launcher switching and tweaks as the desktop app. It's
-in testing now and hasn't been released.
-[Watch the repo](https://github.com/bryanroscoe/shield_optimizer) to hear when it ships.
-
-<img alt="ATV Optimizer for Android walkthrough" src="v2/mobile/screenshots/gallery.gif" width="300" />
-
-The walkthrough shows demo data, not a live device. Developer notes are in [`v2/mobile/`](v2/mobile/README.md).
-
-The Android app will be free to try, with Pro as a one-time Google Play purchase: US $4.99, or $9.99
-or $19.99 if you'd like to chip in more. Every price unlocks the same Pro.
-
-## Support the project
-
-The desktop app is free. If it saved you an afternoon of fiddling, you can
-[buy me a coffee on Ko-fi](https://ko-fi.com/bryanroscoe).
-
-**Donated on Ko-fi? You get the Android app's Pro for free.** Leave a note with your donation (or
-message me on Ko-fi afterwards) and I'll send you a Google Play code that unlocks Pro once the app
-is out.
-
-## Legacy: PowerShell script (v1)
-
-This project started as a PowerShell script, `Shield-Optimizer.ps1`. It's now **legacy**: it still
-works and still gets fixes for serious bugs, but new features only go into the desktop app. If you
-need a terminal tool for scripting, a headless box or Docker, see
-**[docs/LEGACY-V1.md](docs/LEGACY-V1.md)** for setup and usage.
-
-## Contributing
-
-Building from source, architecture and release process: [`v2/README.md`](v2/README.md).
+- [Upstream ATV Optimizer](https://github.com/bryanroscoe/shield_optimizer): the shared foundation and upstream Android companion. Android billing and Play releases are separate from this desktop fork.
+- [My Android TV Desktop Toolkit](https://github.com/steven-ahfu/Android-TV-Desktop-Toolkit): the archived predecessor, now pointing here.
+- [Legacy PowerShell script](docs/LEGACY-V1.md): serious fixes only; new desktop work is under `v2/`.
 
 ## Credits
 
-- Debloat research from community guides including [florisse.nl/shield-debloat](https://florisse.nl/shield-debloat/)
-- Built with AI assistance (Gemini Pro and Claude) by an actual software engineer, tested on real devices
+Thanks to Bryan Roscoe and upstream contributors for the original app, shared engine and safety work. Community debloat research includes [florisse.nl/shield-debloat](https://florisse.nl/shield-debloat/). You can [support Bryan's upstream work on Ko-fi](https://ko-fi.com/bryanroscoe).
+
+See [LICENSE](LICENSE) and the bundled third-party notices.

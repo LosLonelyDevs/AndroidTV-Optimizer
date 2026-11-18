@@ -335,7 +335,7 @@ async function exerciseHistory({ browser, base }) {
 
   await dialog.getByRole("button", { name: /See all releases on GitHub/ }).click();
   assert.deepEqual(await page.evaluate(() => window.__OPENED__), [
-    "https://github.com/bryanroscoe/shield_optimizer/releases",
+    "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/releases",
   ]);
 
   await page.keyboard.press("Escape");

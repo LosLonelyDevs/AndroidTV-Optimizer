@@ -45,6 +45,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  installer-maintenance:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-ci')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+      - name: Verify installer maintenance and rename compatibility
+        working-directory: v2
+        run: npm run test:installer-maintenance
+
   native-test-app:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.native_test_app) ||
@@ -594,7 +609,7 @@ jobs:
 
       - name: Desktop fork tools
         working-directory: v2
-        run: npm run test:fork-tools
+        run: npm run test:fork-tools && npm run test:portable-updates
       - name: RAM and benchmark comparisons
         working-directory: v2
         run: npm run test:ram

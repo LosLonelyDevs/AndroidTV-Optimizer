@@ -1427,7 +1427,7 @@
     }
   }
 
-  const ISSUES_URL = "https://github.com/bryanroscoe/shield_optimizer/issues/new";
+  const ISSUES_URL = "https://github.com/LosLonelyDevs/AndroidTV-Optimizer/issues/new";
 
   /// The launcher-request form, with the package prefilled when the Advanced
   /// picker holds an app the list doesn't know as a launcher.

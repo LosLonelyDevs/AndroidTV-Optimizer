@@ -238,36 +238,6 @@ impl SubprocessAdb {
     }
 
     async fn run_with_timeout(&self, args: &[&str], dur: Duration) -> AdbResult<AdbOutput> {
-        let first = self.run_once(args, dur).await;
-        let Err(AdbError::NonZeroExit { stderr, .. }) = &first else {
-            return first;
-        };
-        let Some(serial) = args
-            .windows(2)
-            .find(|a| a[0] == "-s")
-            .map(|a| a[1])
-            .filter(|s| atv_optimizer_core::adb::is_network_endpoint(s))
-        else {
-            return first;
-        };
-        let error = stderr.to_ascii_lowercase();
-        if !(error.contains("device offline")
-            || (error.contains("device") && error.contains("not found")))
-        {
-            return first;
-        }
-        let reconnected = self
-            .run_once(&["connect", serial], Duration::from_secs(10))
-            .await;
-        if !reconnected
-            .is_ok_and(|out| out.combined().to_ascii_lowercase().contains("connected to"))
-        {
-            return first;
-        }
-        self.run_once(args, dur).await
-    }
-
-    async fn run_once(&self, args: &[&str], dur: Duration) -> AdbResult<AdbOutput> {
         let started = Instant::now();
         if !self.binary.exists() {
             let e = AdbError::BinaryMissing {
