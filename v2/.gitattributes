@@ -1,0 +1,7 @@
+# Release metadata is rewritten by release.sh on Windows, macOS and Linux.
+/Cargo.lock text eol=lf
+/crates/core/Cargo.toml text eol=lf
+/src-tauri/Cargo.toml text eol=lf
+/src-tauri/tauri.conf.json text eol=lf
+/package.json text eol=lf
+/flatpak/io.github.bryanroscoe.ATVOptimizer.metainfo.xml text eol=lf
