@@ -123,3 +123,14 @@ v2/telemetry-worker/test/diagnostics.test.ts bearer-token
 v2/telemetry-worker/test/tiers-admin.test.ts bearer-token
 v2/telemetry-worker/test/helpers.ts high-entropy
 v2/telemetry-worker/vitest.config.ts high-entropy
+
+# Reviewed public upstream 5d829e0c: model number, synthetic ADB endpoints,
+# Android resolver class, PEM header detection, and relocated build receipt.
+docs/OPTIMIZE-CATALOG-REVIEW-2026-11-17.md diff-id
+tests/Shield-Optimizer.Tests.ps1 internal-service
+v2/crates/core/src/commands/home_tracking.rs internal-service
+v2/crates/core/src/engine/launcher.rs internal-hostname
+v2/crates/direct-adb/src/lib.rs private-key
+v2/mobile/tests/lifecycle/baseline-48cba23.json high-entropy
+v2/tests/badge-tips.mjs internal-service
+v2/tests/sideload-drop-states.mjs internal-service
