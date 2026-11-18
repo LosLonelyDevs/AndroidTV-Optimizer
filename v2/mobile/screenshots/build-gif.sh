@@ -20,13 +20,14 @@ if [[ ${#frames[@]} -eq 0 || ! -e "${frames[0]}" ]]; then
 fi
 
 # The concat demuxer ignores the final entry's duration, so list the last twice.
-list="$(mktemp)"
-palette="$(mktemp -t palette.XXXXXX).png"
-trap 'rm -f "$list" "$palette"' EXIT
+scratch="$(mktemp -d ./gallery.XXXXXX)"
+list="$scratch/frames.txt"
+palette="$scratch/palette.png"
+trap 'rm -f "$list" "$palette"; rmdir "$scratch"' EXIT
 for f in "${frames[@]}"; do
-  printf "file '%s'\nduration %s\n" "$PWD/$f" "$SECONDS_PER" >> "$list"
+  printf "file '../%s'\nduration %s\n" "$f" "$SECONDS_PER" >> "$list"
 done
-printf "file '%s'\n" "$PWD/${frames[$((${#frames[@]} - 1))]}" >> "$list"
+printf "file '../%s'\n" "${frames[$((${#frames[@]} - 1))]}" >> "$list"
 
 ffmpeg -y -f concat -safe 0 -i "$list" \
   -vf "scale=${WIDTH}:-1:flags=lanczos,palettegen=stats_mode=full" "$palette" >/dev/null 2>&1

@@ -125,7 +125,7 @@ async function capture(browser, origin, screen, index) {
       connectPort: 5555,
       name: "NVIDIA SHIELD Android TV",
       deviceType: "shield",
-      hardwareId: "0323220012345",
+      hardwareId: "DEMO201900001",
       lastUsed: "2026-10-21T20:14:00.000Z",
     }]));
   });

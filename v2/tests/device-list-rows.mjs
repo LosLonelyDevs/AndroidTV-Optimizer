@@ -297,7 +297,7 @@ async function exerciseOpenAnyway({ browser, base }) {
   await page.waitForURL(/\/devices\/192\.168\.1\.88%3A37015/);
 
   const stored = await page.evaluate(() => localStorage.getItem("shieldopt.openNonTv"));
-  assert.deepEqual(JSON.parse(stored ?? "[]"), ["3A171FDJH00ZX4"],
+  assert.deepEqual(JSON.parse(stored ?? "[]"), ["DEMO202300004"],
     "the choice is filed under the hardware id, never the address");
 
   await page.goto(base, { waitUntil: "networkidle" });

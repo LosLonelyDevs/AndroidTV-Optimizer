@@ -21,15 +21,31 @@
     if (!element) return;
     if (!visible) { element.hidePopover?.(); return; }
     let cancelled = false;
+    const reposition = () => {
+      const anchor = button.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      const bottomLimit = window.innerHeight - box.height - 8;
+      const top = anchor.bottom <= bottomLimit ? anchor.bottom : anchor.top - box.height;
+      element.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`;
+      element.style.top = `${Math.max(8, Math.min(top, bottomLimit))}px`;
+    };
+    const observer = new ResizeObserver(reposition);
     void tick().then(() => {
       if (cancelled) return;
       element.showPopover?.();
-      const anchor = button.getBoundingClientRect();
-      const box = element.getBoundingClientRect();
-      element.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`;
-      element.style.top = `${Math.max(8, anchor.bottom + box.height <= window.innerHeight - 8 ? anchor.bottom : anchor.top - box.height)}px`;
+      reposition();
+      observer.observe(element);
+      observer.observe(button);
     });
-    return () => { cancelled = true; element.hidePopover?.(); };
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+      observer.disconnect();
+      element.hidePopover?.();
+    };
   });
 
   function activate() {
@@ -38,7 +54,7 @@
   }
 </script>
 
-<svelte:window onkeydown={(event) => { if (event.key === "Escape") dismissed = true; }} onresize={() => dismissed = true} />
+<svelte:window onkeydown={(event) => { if (event.key === "Escape") dismissed = true; }} />
 <div class="reason-button" role="group" onpointerenter={() => { hovered = true; dismissed = false; }} onpointerleave={() => hovered = false}>
   <button type="button" bind:this={button} aria-label={label} aria-disabled={reason ? "true" : undefined}
     aria-describedby={reason ? `${id}-reason` : undefined} onclick={activate}

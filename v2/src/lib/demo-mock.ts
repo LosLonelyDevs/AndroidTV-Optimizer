@@ -56,7 +56,7 @@ const device: Device = {
     characteristics: "tv",
     // Shaped like a real ro.serialno so the Profile row renders at a realistic
     // width in the generated screenshots.
-    serial_number: "0323220012345",
+    serial_number: "DEMO201900001",
     leanback: true,
     product: "mdarcy",
   },
@@ -90,7 +90,7 @@ const unconfirmedDevice: Device = {
     build_id: "STTE.240115.001",
     board_platform: "amlogic",
     characteristics: "nosdcard",
-    serial_number: "9AB4C21D7E03",
+    serial_number: "DEMO202200002",
     leanback: null,
     product: "cezanne",
   },
@@ -102,7 +102,7 @@ const unconfirmedDevice: Device = {
 /// USB, so this row must never offer it.
 const usbDevice: Device = {
   id: 3,
-  serial: "0323220054321",
+  serial: "DEMO201900003",
   name: "Workshop Shield",
   model: "Shield TV (2019 Tube)",
   device_type: "shield",
@@ -120,7 +120,7 @@ const usbDevice: Device = {
     build_id: "PPR1.180610.011",
     board_platform: "tegra",
     characteristics: "tv",
-    serial_number: "0323220054321",
+    serial_number: "DEMO201900003",
     leanback: true,
     product: "sif",
   },
@@ -153,7 +153,7 @@ const phoneDevice: Device = {
     build_id: "AP4A.250105.002",
     board_platform: "gs201",
     characteristics: "nosdcard,tablet",
-    serial_number: "3A171FDJH00ZX4",
+    serial_number: "DEMO202300004",
     leanback: false,
     product: "tangorpro",
   },
@@ -182,7 +182,7 @@ const fireTvDevice: Device = {
     build_id: "PS7633",
     board_platform: "mt8696",
     characteristics: "tv",
-    serial_number: "G4N1AB12345678CD",
+    serial_number: "DEMO202100005",
     leanback: true,
     product: "kara",
   },
@@ -403,7 +403,7 @@ function setAdbEngine(engine: AdbEngine): AdbEngineStatus {
 // the `stopAdbOnQuitHeld` flag. The command takes effect at once; only its
 // reply waits, like a slow IPC answer, until the test releases it.
 const heldReplies: Array<() => void> = [];
-const LOG_DIR = "/Users/you/Library/Application Support/ATVOptimizer/logs";
+const LOG_DIR = "/Users/demo/Library/Application Support/ATVOptimizer/logs";
 
 /// Stand-in for the real `collect_diagnostics`, in the same shape: host facts,
 /// then one device's identity and TV evidence, then a log tail. No package
@@ -454,7 +454,7 @@ const storageUsage: StorageUsage = {
   children: [
     { path: "/sdcard/Wallpapers", bytes: 1_801_216_000, is_dir: true },
     { path: "/sdcard/Download", bytes: 95_653_888, is_dir: true },
-    { path: "/sdcard/shield-optimizer-demo.apk", bytes: 115_949_568, is_dir: false },
+    { path: "/sdcard/sample-player.apk", bytes: 115_949_568, is_dir: false },
     { path: "/sdcard/Movies", bytes: 46_055_424, is_dir: true },
     { path: "/sdcard/Android", bytes: 565_248, is_dir: true },
     { path: "/sdcard/Documents", bytes: 126_976, is_dir: true },
@@ -462,13 +462,13 @@ const storageUsage: StorageUsage = {
     { path: "/sdcard/Music", bytes: 12_288, is_dir: true },
   ],
   largest_files: [
-    { path: "/sdcard/Wallpapers/Lofi hip hop mix - Beats to Relax To.mp4", bytes: 593_428_480, is_dir: false },
-    { path: "/sdcard/Wallpapers/30 Minutes of Relaxing Visuals 1080p.mp4", bytes: 500_580_352, is_dir: false },
-    { path: "/sdcard/Wallpapers/CozyCyberpunkLoft_4K.mp4", bytes: 312_270_848, is_dir: false },
-    { path: "/sdcard/shield-optimizer-demo.apk", bytes: 115_949_568, is_dir: false },
-    { path: "/sdcard/Wallpapers/Desktop 2024.06.29.mp4", bytes: 113_582_080, is_dir: false },
-    { path: "/sdcard/Download/season-01-trailer.mkv", bytes: 72_327_168, is_dir: false },
-    { path: "/sdcard/Movies/home-video-2024.mp4", bytes: 46_055_424, is_dir: false },
+    { path: "/sdcard/Wallpapers/Mountain sunrise 4K.mp4", bytes: 593_428_480, is_dir: false },
+    { path: "/sdcard/Wallpapers/Aquarium loop 1080p.mp4", bytes: 500_580_352, is_dir: false },
+    { path: "/sdcard/Wallpapers/Night skyline 4K.mp4", bytes: 312_270_848, is_dir: false },
+    { path: "/sdcard/sample-player.apk", bytes: 115_949_568, is_dir: false },
+    { path: "/sdcard/Wallpapers/Forest trail loop.mp4", bytes: 113_582_080, is_dir: false },
+    { path: "/sdcard/Download/Sample trailer.mkv", bytes: 72_327_168, is_dir: false },
+    { path: "/sdcard/Movies/Demo reel.mp4", bytes: 46_055_424, is_dir: false },
   ],
 };
 
@@ -712,7 +712,7 @@ const tweaks: TweaksState = {
 let savedSnapshots = 0;
 const snapshots: SnapshotFile[] = [
   {
-    path: "/Users/you/Library/Application Support/ATVOptimizer/snapshots/shield-living-room-2026-05-12.json",
+    path: "/Users/demo/Library/Application Support/ATVOptimizer/snapshots/shield-living-room-2026-05-12.json",
     filename: "shield-living-room-2026-05-12.json",
     saved_at: "2026-05-12T18:42:09Z",
     label: "After debloat + Projectivy",
@@ -724,7 +724,7 @@ const snapshots: SnapshotFile[] = [
     launcher: "com.spocky.projengmenu",
   },
   {
-    path: "/Users/you/Library/Application Support/ATVOptimizer/snapshots/shield-bedroom-2026-04-28.json",
+    path: "/Users/demo/Library/Application Support/ATVOptimizer/snapshots/shield-bedroom-2026-04-28.json",
     filename: "shield-bedroom-2026-04-28.json",
     saved_at: "2026-04-28T09:15:33Z",
     label: null,
@@ -1320,7 +1320,7 @@ export function handle(cmd: string, args: Record<string, unknown>): unknown {
       savedSnapshots++;
       const filename = `shield-living-room-2026-06-02-${String(savedSnapshots).padStart(2, "0")}.json`;
       const saved: SnapshotFile = {
-        path: `/Users/you/Library/Application Support/ATVOptimizer/snapshots/${filename}`,
+        path: `/Users/demo/Library/Application Support/ATVOptimizer/snapshots/${filename}`,
         filename,
         saved_at: new Date(Date.UTC(2026, 5, 2, 14, 51, 10) + savedSnapshots * 60_000)
           .toISOString()
@@ -1343,7 +1343,7 @@ export function handle(cmd: string, args: Record<string, unknown>): unknown {
       return;
     }
     case "snapshot_dir_path":
-      return "/Users/you/Library/Application Support/ATVOptimizer/snapshots";
+      return "/Users/demo/Library/Application Support/ATVOptimizer/snapshots";
     case "find_files":
       return { hits: [], unsearched: [] };
     case "list_apks_in_folder":

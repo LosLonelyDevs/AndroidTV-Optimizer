@@ -14,7 +14,7 @@ copyFileSync(icon, join(assets, "android-tv-optimizer-1024.png"));
 copyFileSync(join(v2, "src-tauri/icons/source.svg"), join(assets, "android-tv-optimizer.svg"));
 for (const screen of ["overview", "all-apps", "ram-results", "device-display"]) {
   if (!existsSync(join(assets, "screenshots", `${screen}.png`))) {
-    throw new Error(`Missing full-page ${screen} screenshot; run npm run screenshots`);
+    throw new Error(`Missing ${screen} screenshot; run npm run screenshots`);
   }
 }
 console.log("README assets refreshed: vector logo, original 1024px icon and four screenshots.");

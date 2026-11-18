@@ -24,7 +24,7 @@ const FIXTURE = JSON.parse(
 
 // The demo SHIELD: its adb serial is an address, and its ro.serialno is set.
 const DEVICE_SERIAL = "192.168.1.42:5555";
-const HARDWARE_SERIAL = "0323220012345";
+const HARDWARE_SERIAL = "DEMO201900001";
 const UNCATALOGUED = "org.fdroid.fdroid";
 const CATALOGUED = "com.netflix.ninja";
 

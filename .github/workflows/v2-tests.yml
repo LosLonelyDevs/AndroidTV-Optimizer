@@ -278,7 +278,7 @@ jobs:
         # Pinned to ubuntu-22.04 to match v2-release.yml — both jobs need the
         # same libwebkit2gtk-4.1-dev package name and 24.04+ ships it under
         # slightly different paths.
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        os: [ubuntu-22.04, macos-26-intel, windows-latest]
     steps:
       - uses: actions/checkout@v5
 
